@@ -1,0 +1,69 @@
+# Azure App Service Deployment Configuration
+# This file configures the deployment of the SIMT backend to Azure App Service
+
+name: Deploy SIMT Backend to Azure
+
+on:
+  push:
+    branches: [ main ]
+    paths: [ 'backend/**' ]
+  workflow_dispatch:
+
+env:
+  AZURE_WEBAPP_NAME: simt-backend
+  AZURE_WEBAPP_PACKAGE_PATH: './backend'
+  NODE_VERSION: '18.x'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 'Checkout GitHub Action'
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: backend/package-lock.json
+
+    - name: 'Resolve Project Dependencies Using Npm'
+      shell: bash
+      run: |
+        pushd '${{ env.AZURE_WEBAPP_PACKAGE_PATH }}'
+        npm ci
+        popd
+
+    - name: 'Run Tests'
+      shell: bash
+      run: |
+        pushd '${{ env.AZURE_WEBAPP_PACKAGE_PATH }}'
+        npm test
+        popd
+
+    - name: 'Zip Package for Deploy'
+      run: |
+        cd ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
+        zip -r ../package.zip . -x 'node_modules/**' '*.git*' '*.env*'
+
+    - name: 'Deploy to Azure Web App'
+      id: deploy-to-azure-webapp
+      uses: azure/webapps-deploy@v2
+      with:
+        app-name: ${{ env.AZURE_WEBAPP_NAME }}
+        publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE }}
+        package: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}/../package.zip
+
+    - name: 'Configure App Settings'
+      uses: azure/CLI@v1
+      with:
+        inlineScript: |
+          az webapp config appsettings set --name ${{ env.AZURE_WEBAPP_NAME }} --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} --settings \
+            NODE_ENV=production \
+            MONGODB_URI=${{ secrets.MONGODB_URI }} \
+            JWT_SECRET=${{ secrets.JWT_SECRET }} \
+            OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
+            FRONTEND_URL=${{ secrets.FRONTEND_URL }}
+
