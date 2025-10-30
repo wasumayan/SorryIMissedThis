@@ -103,9 +103,11 @@ def _register_blueprints(app):
     from app.routes.upload import upload_bp
     from app.routes.recommendations import recommendations_bp
     from app.routes.conversations import conversations_bp
+    from app.routes.contacts import contacts_bp
 
     # Register with /api prefix
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
+    app.register_blueprint(contacts_bp, url_prefix='/api/contacts')
     app.register_blueprint(upload_bp, url_prefix='/api/upload')
     app.register_blueprint(recommendations_bp, url_prefix='/api')
     app.register_blueprint(conversations_bp, url_prefix='/api/conversations')

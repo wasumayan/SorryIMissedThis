@@ -4,12 +4,11 @@ Conversations routes for managing individual conversations
 
 from flask import Blueprint, request, jsonify, current_app
 
-from app.services.storage import StorageService
+from app.services.azure_storage import storage
 from app.services.ai_service import AIService
 
 
 conversations_bp = Blueprint('conversations', __name__)
-storage = StorageService()
 ai_service = AIService()
 
 

@@ -1,5 +1,5 @@
 // API service for connecting to the SIMT backend
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5002/api';
 
 interface ApiResponse<T> {
   success: boolean;
@@ -32,14 +32,14 @@ class ApiClient {
     options: RequestInit = {}
   ): Promise<ApiResponse<T>> {
     const url = `${this.baseURL}${endpoint}`;
-    
-    const headers: HeadersInit = {
+
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...options.headers,
+      ...(options.headers as Record<string, string> || {}),
     };
 
     if (this.token) {
-      headers.Authorization = `Bearer ${this.token}`;
+      headers['Authorization'] = `Bearer ${this.token}`;
     }
 
     try {
@@ -277,6 +277,29 @@ class ApiClient {
 
   async getCalendarEvents(start: string, end: string) {
     return this.request<{ events: CalendarEvent[] }>(`/schedule/calendar?start=${start}&end=${end}`);
+  }
+
+  // Upload
+  async uploadTranscript(file: File, userId: string, userDisplayName?: string) {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('user_id', userId);
+    if (userDisplayName) {
+      formData.append('user_display_name', userDisplayName);
+    }
+
+    const headers: Record<string, string> = {};
+    if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`;
+    }
+
+    const response = await fetch(`${API_BASE_URL}/upload/transcript`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    return response.json();
   }
 }
 

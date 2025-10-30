@@ -5,7 +5,7 @@ import { Progress } from "./ui/progress";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Logo } from "./Logo";
-import { Shield, MessageCircle, Lock, CheckCircle, Leaf, User as UserIcon, Mail, Key } from "lucide-react";
+import { Shield, MessageCircle, Lock, CheckCircle, Leaf, User as UserIcon, Mail, Key, Upload } from "lucide-react";
 import { apiClient, type User } from "../services/api";
 
 interface OnboardingProps {
@@ -24,6 +24,10 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [userData, setUserData] = useState<User | undefined>(undefined);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'processing' | 'complete' | 'error'>('idle');
 
   const totalSteps = 6;
   const progress = ((step + 1) / totalSteps) * 100;
@@ -32,7 +36,8 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     if (step < totalSteps - 1) {
       setStep(step + 1);
     } else {
-      onComplete();
+      // Final step - complete onboarding with user data
+      onComplete(userData);
     }
   };
 
@@ -56,7 +61,9 @@ export function Onboarding({ onComplete }: OnboardingProps) {
       }
 
       if (response.success && response.data) {
-        onComplete(response.data.user);
+        // Store user data and proceed to next onboarding step
+        setUserData(response.data.user);
+        nextStep();
       } else {
         setError(response.error || 'Authentication failed');
       }
@@ -70,6 +77,57 @@ export function Onboarding({ onComplete }: OnboardingProps) {
 
   const skipStep = () => {
     nextStep();
+  };
+
+  const handleFileSelect = (event: any) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      setUploadFile(file);
+      setUploadStatus('idle');
+      setError('');
+    }
+  };
+
+  const handleUpload = async () => {
+    if (!uploadFile || !userData) {
+      setError('Please select a file to upload');
+      return;
+    }
+
+    setUploadStatus('uploading');
+    setUploadProgress(30);
+    setError('');
+
+    try {
+      const response = await apiClient.uploadTranscript(
+        uploadFile,
+        userData.id,
+        userData.name
+      );
+
+      if (response.success) {
+        setUploadStatus('processing');
+        setUploadProgress(60);
+
+        // Simulate processing time
+        await new Promise(resolve => setTimeout(resolve, 1500));
+
+        setUploadStatus('complete');
+        setUploadProgress(100);
+
+        // Auto-advance after successful upload
+        setTimeout(() => {
+          nextStep();
+        }, 1000);
+      } else {
+        setUploadStatus('error');
+        setError(response.error || 'Upload failed. Please try again.');
+      }
+    } catch (err) {
+      setUploadStatus('error');
+      setError('Upload failed. Please check your connection and try again.');
+      console.error('Upload error:', err);
+    }
   };
 
   return (
@@ -364,41 +422,120 @@ export function Onboarding({ onComplete }: OnboardingProps) {
           </div>
         )}
 
-        {/* Step 5: Preferences */}
+        {/* Step 5: Upload Chat Transcripts */}
         {step === 5 && (
           <div className="space-y-6">
             <div className="flex items-center gap-3 mb-4">
-              <Leaf className="w-8 h-8 text-primary" />
-              <h2>Your Grove is Ready</h2>
+              <Upload className="w-8 h-8 text-primary" />
+              <h2>Upload Your Conversations</h2>
             </div>
             <p className="text-muted-foreground">
-              We're analyzing your conversations to build your grove. This may take a few moments.
+              Upload your WhatsApp or Telegram chat exports to populate your grove. We'll analyze your conversations to help you stay connected.
             </p>
-            
+
+            {error && (
+              <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3">
+                <p className="text-destructive text-sm">{error}</p>
+              </div>
+            )}
+
             <div className="bg-gradient-to-br from-secondary/50 to-accent/30 rounded-lg p-8 space-y-4">
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 text-primary">
-                  <CheckCircle className="w-5 h-5" />
-                  <span style={{ fontSize: '0.875rem' }}>Scanning conversations...</span>
+              {uploadStatus === 'idle' && (
+                <div className="space-y-4">
+                  <div className="border-2 border-dashed border-primary/30 rounded-lg p-8 text-center">
+                    <Upload className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
+                    <p className="text-foreground mb-2">Drop your chat export file here</p>
+                    <p className="text-muted-foreground text-sm mb-4">Supports .txt or .zip files</p>
+                    <Label htmlFor="file-upload">
+                      <div className="inline-block">
+                        <Button type="button" variant="outline" onClick={() => document.getElementById('file-upload')?.click()}>
+                          Choose File
+                        </Button>
+                      </div>
+                    </Label>
+                    <Input
+                      id="file-upload"
+                      type="file"
+                      accept=".txt,.zip"
+                      onChange={handleFileSelect}
+                      className="hidden"
+                    />
+                  </div>
+                  {uploadFile && (
+                    <div className="bg-primary/10 border border-primary/20 rounded-lg p-4">
+                      <p className="text-sm text-foreground">Selected: {uploadFile.name}</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {(uploadFile.size / 1024).toFixed(2)} KB
+                      </p>
+                    </div>
+                  )}
                 </div>
-                <div className="flex items-center gap-2 text-primary">
-                  <CheckCircle className="w-5 h-5" />
-                  <span style={{ fontSize: '0.875rem' }}>Analyzing interaction patterns...</span>
+              )}
+
+              {(uploadStatus === 'uploading' || uploadStatus === 'processing') && (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-primary">
+                      <CheckCircle className="w-5 h-5" />
+                      <span style={{ fontSize: '0.875rem' }}>
+                        {uploadStatus === 'uploading' ? 'Uploading file...' : 'Processing conversations...'}
+                      </span>
+                    </div>
+                    {uploadStatus === 'processing' && (
+                      <>
+                        <div className="flex items-center gap-2 text-primary">
+                          <CheckCircle className="w-5 h-5" />
+                          <span style={{ fontSize: '0.875rem' }}>Analyzing interaction patterns...</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-primary">
+                          <CheckCircle className="w-5 h-5" />
+                          <span style={{ fontSize: '0.875rem' }}>Growing your relationship tree...</span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  <div className="pt-4">
+                    <Progress value={uploadProgress} className="h-2" />
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 text-primary">
-                  <CheckCircle className="w-5 h-5" />
-                  <span style={{ fontSize: '0.875rem' }}>Growing your relationship tree...</span>
+              )}
+
+              {uploadStatus === 'complete' && (
+                <div className="text-center space-y-4">
+                  <CheckCircle className="w-16 h-16 mx-auto text-primary" />
+                  <div>
+                    <h4 className="text-foreground text-lg mb-2">Upload Complete!</h4>
+                    <p className="text-muted-foreground text-sm">
+                      Your conversations have been processed and your grove is ready.
+                    </p>
+                  </div>
                 </div>
-              </div>
-              
-              <div className="pt-4">
-                <Progress value={100} className="h-2" />
-              </div>
+              )}
             </div>
 
             <div className="flex gap-3 pt-6">
-              <Button onClick={nextStep} className="w-full" size="lg">
-                Enter Your Grove
+              <Button
+                variant="outline"
+                onClick={() => setStep(step - 1)}
+                className="flex-1"
+                disabled={uploadStatus === 'uploading' || uploadStatus === 'processing'}
+              >
+                Back
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={nextStep}
+                className="flex-1"
+                disabled={uploadStatus === 'uploading' || uploadStatus === 'processing'}
+              >
+                Skip for Now
+              </Button>
+              <Button
+                onClick={handleUpload}
+                className="flex-1"
+                disabled={!uploadFile || uploadStatus === 'uploading' || uploadStatus === 'processing' || uploadStatus === 'complete'}
+              >
+                {uploadStatus === 'uploading' || uploadStatus === 'processing' ? 'Processing...' : 'Upload'}
               </Button>
             </div>
           </div>

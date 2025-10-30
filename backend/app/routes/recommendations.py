@@ -4,12 +4,11 @@ Recommendations routes for generating conversation prompts
 
 from flask import Blueprint, request, jsonify, current_app
 
-from app.services.storage import StorageService
+from app.services.azure_storage import storage
 from app.services.ai_service import AIService
 
 
 recommendations_bp = Blueprint('recommendations', __name__)
-storage = StorageService()
 ai_service = AIService()
 
 

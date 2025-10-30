@@ -9,13 +9,11 @@ import tempfile
 from werkzeug.utils import secure_filename
 
 from app.services.chat_parser import ChatParser
-from app.services.storage import StorageService
+from app.services.azure_storage import storage
 from app.services.ai_service import AIService
-from app.models import User
 
 
 upload_bp = Blueprint('upload', __name__)
-storage = StorageService()
 ai_service = AIService()
 
 
@@ -55,13 +53,12 @@ def upload_transcript():
         # Get user information
         user_id = request.form.get('user_id', 'default_user')
         user_display_name = request.form.get('user_display_name', user_id)
-        
+
         # Ensure user exists in database
-        user = storage.get_user(user_id)
+        user = storage.get_user_by_id(user_id)
         if not user:
-            user = User(user_id=user_id, display_name=user_display_name)
-            storage.create_user(user)
-            current_app.logger.info(f"Created new user: {user_id}")
+            current_app.logger.info(f"User {user_id} not found in database during upload")
+            return jsonify({'error': 'User not found. Please register first.'}), 404
         
         # Process file
         current_app.logger.info(f"Processing upload from user {user_id}: {file.filename}")
@@ -119,30 +116,43 @@ def upload_transcript():
             
             if not all_conversations:
                 return jsonify({'error': 'No valid conversations found in uploaded file(s)'}), 400
-            
+
             # Save conversations to database
-            conversation_ids = storage.bulk_save_conversations(all_conversations)
-            
-            # Generate initial prompts for each conversation
-            prompts_generated = 0
+            conversation_ids = []
             for conversation in all_conversations:
-                # Update conversation_id from database
-                conversation.conversation_id = conversation_ids.get(conversation.partner_name)
-                
-                # Generate prompts (async in production)
-                try:
-                    prompts = ai_service.generate_prompts(conversation, num_prompts=3)
-                    for prompt in prompts:
-                        prompt.conversation_id = conversation.conversation_id
-                        storage.save_prompt(prompt)
-                    prompts_generated += len(prompts)
-                except Exception as e:
-                    current_app.logger.error(f"Error generating prompts: {str(e)}")
-            
+                # Convert conversation to dict for Azure storage
+                conversation_data = conversation.to_dict()
+
+                # Create conversation in Azure Cosmos DB
+                conv_id = storage.create_conversation(conversation_data)
+                if conv_id:
+                    conversation_ids.append(conv_id)
+                    conversation.conversation_id = conv_id
+                    current_app.logger.info(
+                        f"Saved conversation with {conversation.partner_name} (ID: {conv_id})"
+                    )
+                else:
+                    current_app.logger.error(
+                        f"Failed to save conversation with {conversation.partner_name}"
+                    )
+
+            # TODO: Generate initial prompts for each conversation
+            # This requires implementing prompt storage in azure_storage.py
+            prompts_generated = 0
+            # for conversation in all_conversations:
+            #     try:
+            #         prompts = ai_service.generate_prompts(conversation, num_prompts=3)
+            #         for prompt in prompts:
+            #             prompt.conversation_id = conversation.conversation_id
+            #             storage.create_prompt(prompt.to_dict())
+            #         prompts_generated += len(prompts)
+            #     except Exception as e:
+            #         current_app.logger.error(f"Error generating prompts: {str(e)}")
+
             # Prepare response
             total_messages = sum(len(c.messages) for c in all_conversations)
             partners = [c.partner_name for c in all_conversations]
-            
+
             response = {
                 'success': True,
                 'message': 'Chat transcript(s) processed successfully',
@@ -152,15 +162,15 @@ def upload_transcript():
                     'conversation_partners': partners,
                     'total_messages': total_messages,
                     'prompts_generated': prompts_generated,
-                    'conversation_ids': list(conversation_ids.values())
+                    'conversation_ids': conversation_ids
                 }
             }
-            
+
             current_app.logger.info(
                 f"Successfully processed upload for user {user_id}: "
                 f"{len(all_conversations)} conversations, {total_messages} messages"
             )
-            
+
             return jsonify(response), 200
     
     except zipfile.BadZipFile:
@@ -187,27 +197,37 @@ def get_upload_status(user_id):
     """
     
     try:
-        user = storage.get_user(user_id)
-        
+        user = storage.get_user_by_id(user_id)
+
         if not user:
             return jsonify({'error': 'User not found'}), 404
-        
+
         stats = storage.get_user_stats(user_id)
         conversations = storage.get_user_conversations(user_id, limit=10)
-        
-        conversation_summary = [
-            {
-                'partner_name': c.partner_name,
-                'total_messages': c.metrics.total_messages,
-                'days_since_contact': c.metrics.days_since_contact,
-                'health': c.get_relationship_health()
-            }
-            for c in conversations
-        ]
+
+        # Conversations are returned as dicts from Azure storage
+        conversation_summary = []
+        for c in conversations:
+            # Handle both dict and Conversation object
+            if isinstance(c, dict):
+                metrics = c.get('metrics', {})
+                conversation_summary.append({
+                    'partner_name': c.get('partner_name', 'Unknown'),
+                    'total_messages': metrics.get('total_messages', 0),
+                    'days_since_contact': metrics.get('days_since_contact'),
+                    'health': 'healthy'  # Simplified for now
+                })
+            else:
+                conversation_summary.append({
+                    'partner_name': c.partner_name,
+                    'total_messages': c.metrics.total_messages,
+                    'days_since_contact': c.metrics.days_since_contact,
+                    'health': c.get_relationship_health()
+                })
         
         return jsonify({
             'user_id': user_id,
-            'display_name': user.display_name,
+            'display_name': user.get('name', user_id) if isinstance(user, dict) else user.display_name,
             'stats': stats,
             'recent_conversations': conversation_summary
         }), 200
