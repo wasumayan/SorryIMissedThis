@@ -1,0 +1,39 @@
+# Sorry I Missed This - Backend Dependencies
+
+# Core Framework
+Flask==2.3.3
+flask-cors==4.0.0
+Werkzeug==2.3.7
+
+# Environment Management
+python-dotenv==1.0.0
+
+# AI/ML
+openai>=1.54.0
+httpx>=0.27.0
+
+# Database - Azure Cosmos DB
+azure-cosmos==4.5.1
+azure-identity==1.15.0
+
+# Data Processing
+python-dateutil==2.8.2
+
+# Production Server
+gunicorn==21.2.0
+
+# Testing (Development)
+pytest==7.4.3
+pytest-flask==1.3.0
+pytest-cov==4.1.0
+
+# Code Quality (Development)
+flake8==6.1.0
+black==23.11.0
+pylint==3.0.2
+
+# Type Checking (Development)  
+mypy==1.7.1
+
+# Documentation (Development)
+sphinx==7.2.6

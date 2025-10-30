@@ -5,8 +5,8 @@ import { Progress } from "./ui/progress";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Logo } from "./Logo";
-import { Shield, MessageCircle, Lock, CheckCircle, Leaf, User, Mail, Key } from "lucide-react";
-import { apiClient, User } from "../services/api";
+import { Shield, MessageCircle, Lock, CheckCircle, Leaf, User as UserIcon, Mail, Key } from "lucide-react";
+import { apiClient, type User } from "../services/api";
 
 interface OnboardingProps {
   onComplete: (userData?: User) => void;
@@ -107,7 +107,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                 <div className="space-y-2">
                   <Label htmlFor="name">Full Name</Label>
                   <div className="relative">
-                    <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                     <Input
                       id="name"
                       type="text"
