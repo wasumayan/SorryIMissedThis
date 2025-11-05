@@ -65,22 +65,43 @@ class Conversation:
     messages: List[Message]
     metrics: ConversationMetrics
     conversation_id: Optional[str] = None
-    category: str = "general"  # family, friends, work, dormant, priority
+    category: str = "friends"  # family, friends, work - relationship categories
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
     
     def to_dict(self) -> Dict:
-        """Convert to dictionary for Firestore"""
+        """Convert to dictionary for Firestore/Cosmos DB"""
+        metrics_dict = self.metrics.to_dict()
+
+        # Calculate interaction frequency (messages per day since first message)
+        days_active = max(1, (datetime.now() - self.created_at).days)
+        interaction_frequency = len(self.messages) / days_active if days_active > 0 else 0
+
         return {
+            'id': self.conversation_id or self.partner_id,  # Azure Cosmos DB requires 'id' field
             'user_id': self.user_id,
-            'partner_name': self.partner_name,
+            'userId': self.user_id,  # camelCase for frontend
+            'partner_name': self.partner_name,  # Keep snake_case for backend
+            'partnerName': self.partner_name,  # camelCase for frontend
             'partner_id': self.partner_id,
+            'partnerId': self.partner_id,  # camelCase for frontend
             'messages': [msg.to_dict() for msg in self.messages],
-            'metrics': self.metrics.to_dict(),
+            'messageCount': len(self.messages),
+            'metrics': metrics_dict,
             'conversation_id': self.conversation_id,
+            'conversationId': self.conversation_id,  # camelCase for frontend
             'category': self.category,
+            'status': self.get_relationship_health(),
+            'reciprocity': metrics_dict.get('reciprocity', 0.5),  # For frontend access
+            'daysSinceContact': metrics_dict.get('days_since_contact', 0),  # camelCase
+            'avgResponseTime': metrics_dict.get('avg_response_time', 0),  # camelCase
+            'lastMessageAt': metrics_dict.get('last_message_time'),  # camelCase
+            'interactionFrequency': round(interaction_frequency, 2),  # Messages per day
             'created_at': self.created_at.isoformat(),
-            'updated_at': self.updated_at.isoformat()
+            'createdAt': self.created_at.isoformat(),  # camelCase for frontend
+            'updated_at': self.updated_at.isoformat(),
+            'updatedAt': self.updated_at.isoformat(),  # camelCase for frontend
+            'type': 'conversation'  # Add type field for Cosmos DB filtering
         }
     
     @classmethod
@@ -95,16 +116,17 @@ class Conversation:
     def get_relationship_health(self) -> str:
         """Determine relationship health status"""
         if self.metrics.days_since_contact is None:
-            return "unknown"
-        
-        if self.metrics.days_since_contact > 30:
-            return "at_risk"
-        elif self.metrics.days_since_contact > 14:
-            return "dormant"
-        elif self.metrics.days_since_contact > 7:
-            return "attention"
-        else:
             return "healthy"
+
+        # Map to frontend status values: healthy, attention, dormant, wilted
+        if self.metrics.days_since_contact > 60:
+            return "wilted"  # Very dormant - needs urgent attention
+        elif self.metrics.days_since_contact > 30:
+            return "dormant"  # Dormant - not communicated in over a month
+        elif self.metrics.days_since_contact > 14:
+            return "attention"  # Needs attention - getting stale
+        else:
+            return "healthy"  # Active and healthy
     
     def get_last_n_messages(self, n: int = 10) -> List[Message]:
         """Get the last N messages for context"""

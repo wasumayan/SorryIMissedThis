@@ -26,7 +26,7 @@ export default function App() {
       try {
         const response = await apiClient.getCurrentUser();
         if (response.success && response.data) {
-          setUser(response.data.user);
+          setUser(response.data as User);
           setCurrentView("grove");
         } else {
           setCurrentView("onboarding");
@@ -114,8 +114,9 @@ export default function App() {
 
       {/* Main Content */}
       <div className="flex-1 overflow-hidden">
-        {currentView === "grove" && (
+        {currentView === "grove" && user && (
           <GroveDashboard
+            user={user}
             onContactSelect={handleContactSelect}
             onViewAnalytics={() => setCurrentView("analytics")}
             onViewSchedule={() => setCurrentView("schedule")}
@@ -129,16 +130,17 @@ export default function App() {
           />
         )}
 
-        {currentView === "analytics" && (
-          <Analytics onBack={handleBackToGrove} />
+        {currentView === "analytics" && user && (
+          <Analytics user={user} onBack={handleBackToGrove} />
         )}
 
-        {currentView === "schedule" && (
-          <Schedule onBack={handleBackToGrove} />
+        {currentView === "schedule" && user && (
+          <Schedule user={user} onBack={handleBackToGrove} />
         )}
 
-        {currentView === "settings" && (
+        {currentView === "settings" && user && (
           <Settings
+            user={user}
             onBack={handleBackToGrove}
             darkMode={darkMode}
             onToggleDarkMode={() => setDarkMode(!darkMode)}

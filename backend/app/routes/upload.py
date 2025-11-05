@@ -100,19 +100,32 @@ def upload_transcript():
                 
                 # Parse messages
                 messages = parser.parse_chat_file(content, user_display_name)
-                
+
                 if not messages:
                     current_app.logger.warning(f"No messages found in {text_file}")
                     continue
-                
-                # Create conversation
-                conversation = parser.create_conversation(messages, user_display_name)
-                all_conversations.append(conversation)
-                
-                current_app.logger.info(
-                    f"Parsed conversation with {conversation.partner_name}: "
-                    f"{len(messages)} messages"
-                )
+
+                current_app.logger.info(f"Parsed {len(messages)} messages from {text_file}")
+
+                # Check if this is a group chat (multiple senders besides user)
+                senders = set(msg.sender for msg in messages)
+                senders.discard(user_display_name)
+
+                if len(senders) > 1:
+                    # Group chat - create individual conversations for each person
+                    current_app.logger.info(f"Detected group chat with {len(senders)} participants")
+                    conversations = parser.create_conversations_from_group(messages, user_display_name)
+                    all_conversations.extend(conversations)
+                    current_app.logger.info(f"Created {len(conversations)} individual conversations from group chat")
+                else:
+                    # One-on-one conversation
+                    conversation = parser.create_conversation(messages, user_display_name)
+                    if conversation:  # Only add if not None
+                        all_conversations.append(conversation)
+                        current_app.logger.info(
+                            f"Parsed conversation with {conversation.partner_name}: "
+                            f"{len(messages)} messages"
+                        )
             
             if not all_conversations:
                 return jsonify({'error': 'No valid conversations found in uploaded file(s)'}), 400
@@ -120,6 +133,11 @@ def upload_transcript():
             # Save conversations to database
             conversation_ids = []
             for conversation in all_conversations:
+                # Generate unique ID if not present
+                import uuid
+                if not conversation.conversation_id:
+                    conversation.conversation_id = str(uuid.uuid4())
+
                 # Convert conversation to dict for Azure storage
                 conversation_data = conversation.to_dict()
 

@@ -13,28 +13,79 @@ from app.models import Message, Conversation, ConversationMetrics
 
 class ChatParser:
     """Parses WhatsApp chat exports"""
-    
+
     # WhatsApp message format: [MM/DD/YY, HH:MM:SS AM/PM] Sender: Message
     WHATSAPP_PATTERN = r'\[([^\]]+)\]\s+([^:]+):\s+(.+)'
-    
-    # Alternative formats to support
+
+    # Alternative formats to support (including the format from your group chat)
     ALTERNATIVE_PATTERNS = [
-        r'(\d{1,2}/\d{1,2}/\d{2,4},\s+\d{1,2}:\d{2}:\d{2}\s+(?:AM|PM))\s+-\s+([^:]+):\s+(.+)',
-        r'(\d{1,2}/\d{1,2}/\d{2,4},\s+\d{1,2}:\d{2})\s+-\s+([^:]+):\s+(.+)',
+        # Format: [8/27/24, 11:06:51 AM] Sender: Message (with special unicode chars)
+        r'\[(\d{1,2}/\d{1,2}/\d{2,4},\s+\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|am|pm)?)\]\s+([^:]+):\s+(.+)',
+        # Format: 8/27/24, 11:06:51 AM - Sender: Message
+        r'(\d{1,2}/\d{1,2}/\d{2,4},\s+\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|am|pm)?)\s*[-â]\s*([^:]+):\s+(.+)',
+        # Format without AM/PM
+        r'(\d{1,2}/\d{1,2}/\d{2,4},\s+\d{1,2}:\d{2}(?::\d{2})?)\s*[-â]\s*([^:]+):\s+(.+)',
+    ]
+
+    # System message patterns to filter out
+    SYSTEM_MESSAGE_PATTERNS = [
+        r'^‎.*added you$',  # Only filter if starts with invisible char
+        r'^‎.*added\s+@?[\w\s]+$',
+        r'^‎.*created this group$',
+        r'.*changed the group name to.*',
+        r'.*changed the subject to.*',
+        r'.*changed the group description$',
+        r'.*changed this group\'s icon$',
+        r'^‎.*left$',
+        r'^‎.*removed\s+.*',
+        r'.*joined using this group\'s invite link$',
+        r'^Messages and calls are end-to-end encrypted.*',
+        r'^This chat is with a business account.*',
+        r'^‎image omitted$',  # Only filter standalone media omitted messages
+        r'^‎video omitted$',
+        r'^‎audio omitted$',
+        r'^‎document omitted$',
+        r'^‎sticker omitted$',
+        r'^‎GIF omitted$',
+        r'^‎Contact card omitted$',
+        r'^‎Location:.*',
+        r'^‎POLL:.*',  # Filter poll messages
+        r'^‎OPTION:.*',  # Filter poll options
     ]
     
     DATE_FORMATS = [
-        '%m/%d/%y, %I:%M:%S %p',  # 9/4/24, 5:02:44 PM
-        '%m/%d/%Y, %I:%M:%S %p',  # 9/4/2024, 5:02:44 PM
-        '%d/%m/%y, %H:%M:%S',      # European format
+        '%m/%d/%y, %I:%M:%S %p',    # 8/27/24, 11:06:51 AM
+        '%m/%d/%y, %I:%M:%S%p',     # Without space before AM/PM
+        '%m/%d/%y, %I:%M %p',       # Without seconds
+        '%m/%d/%y, %I:%M%p',        # Without seconds or space
+        '%m/%d/%Y, %I:%M:%S %p',    # Full year
+        '%m/%d/%Y, %I:%M:%S%p',
+        '%m/%d/%Y, %I:%M %p',
+        '%m/%d/%Y, %I:%M%p',
+        '%d/%m/%y, %H:%M:%S',       # European format
         '%d/%m/%Y, %H:%M:%S',
-        '%m/%d/%y, %H:%M',         # Without seconds
+        '%m/%d/%y, %H:%M',          # 24-hour without seconds
         '%m/%d/%Y, %H:%M',
     ]
     
     def __init__(self, user_id: str):
         """Initialize parser with user ID"""
         self.user_id = user_id
+
+    def _is_system_message(self, content: str) -> bool:
+        """Check if message content is a system message"""
+        for pattern in self.SYSTEM_MESSAGE_PATTERNS:
+            if re.match(pattern, content, re.IGNORECASE):
+                return True
+        return False
+
+    def _clean_content(self, content: str) -> str:
+        """Clean message content by removing WhatsApp metadata and special characters"""
+        # Remove "This message was edited" suffix
+        content = re.sub(r'\s*‎?<This message was edited>$', '', content)
+        # Remove leading invisible characters
+        content = content.lstrip('‎\u200e\u200f ')
+        return content.strip()
     
     def parse_chat_file(self, file_content: str, user_display_name: str) -> List[Message]:
         """
@@ -68,12 +119,25 @@ class ChatParser:
                 # Start new message
                 timestamp_str, sender, content = match
                 timestamp = self._parse_timestamp(timestamp_str)
-                
+
+                # Clean content
+                content = self._clean_content(content)
+
+                # Skip system messages
+                if self._is_system_message(content):
+                    current_message = None
+                    continue
+
+                # Skip empty messages
+                if not content:
+                    current_message = None
+                    continue
+
                 if timestamp:
                     current_message = Message(
                         timestamp=timestamp,
                         sender=sender.strip(),
-                        content=content.strip()
+                        content=content
                     )
                 else:
                     current_message = None
@@ -117,33 +181,127 @@ class ChatParser:
         print(f"⚠️ Could not parse timestamp: {timestamp_str}")
         return None
     
+    def create_conversations_from_group(
+        self,
+        messages: List[Message],
+        user_display_name: str
+    ) -> List[Conversation]:
+        """
+        Create individual Conversation objects for each person in a group chat
+
+        Args:
+            messages: List of parsed messages from the group chat
+            user_display_name: The user's display name in the chat
+
+        Returns:
+            List of Conversation objects, one for each unique person
+        """
+        # Identify all unique senders (excluding the user)
+        all_senders = set(msg.sender for msg in messages)
+        all_senders.discard(user_display_name)
+
+        # Clean sender names (remove ~ prefix, etc.)
+        clean_senders = set()
+        for sender in all_senders:
+            clean_sender = sender.lstrip('~â¯ ').strip()
+            if clean_sender and clean_sender not in ['You', 'you']:
+                clean_senders.add(clean_sender)
+
+        # Filter out group names (e.g., "SAIP Board 2025-26")
+        group_name_patterns = [
+            r'.*Board.*\d{4}.*',  # Matches "SAIP Board 2025-26" etc.
+            r'.*Group.*',
+            r'.*Chat.*',
+            r'.*Team.*',
+        ]
+
+        filtered_senders = set()
+        for sender in clean_senders:
+            is_group_name = False
+            for pattern in group_name_patterns:
+                if re.match(pattern, sender, re.IGNORECASE):
+                    is_group_name = True
+                    print(f"[PARSER] Filtering out group name: {sender}")
+                    break
+
+            if not is_group_name:
+                filtered_senders.add(sender)
+
+        clean_senders = filtered_senders
+
+        print(f"[PARSER] Found {len(clean_senders)} unique participants in group chat")
+        print(f"[PARSER] Participants: {', '.join(sorted(clean_senders))}")
+
+        # Create a conversation for each person
+        conversations = []
+        for partner_name in clean_senders:
+            # Filter messages to only include this partner and the user
+            partner_messages = [
+                msg for msg in messages
+                if msg.sender == partner_name or msg.sender == user_display_name
+            ]
+
+            if len(partner_messages) > 0:
+                # Calculate metrics for this specific conversation
+                metrics = self._calculate_metrics(partner_messages, user_display_name)
+
+                # Create conversation
+                conversation = Conversation(
+                    user_id=self.user_id,
+                    partner_name=partner_name,
+                    partner_id=self._generate_partner_id(partner_name),
+                    messages=partner_messages,
+                    metrics=metrics,
+                    category=self._categorize_conversation(metrics)
+                )
+
+                conversations.append(conversation)
+                print(f"[PARSER] Created conversation with {partner_name} ({len(partner_messages)} messages)")
+
+        return conversations
+
     def create_conversation(
-        self, 
-        messages: List[Message], 
+        self,
+        messages: List[Message],
         user_display_name: str,
         partner_name: Optional[str] = None
     ) -> Conversation:
         """
         Create a Conversation object from parsed messages
-        
+
         Args:
             messages: List of parsed messages
             user_display_name: The user's display name in the chat
             partner_name: Optional override for partner's name
-        
+
         Returns:
             Conversation object with metrics
         """
-        
-        # Identify conversation partner
+
+        # Identify conversation partner(s)
         if not partner_name:
             senders = set(msg.sender for msg in messages)
             senders.discard(user_display_name)
-            partner_name = list(senders)[0] if senders else "Unknown"
-        
+
+            # Remove tilde prefix and clean sender names
+            clean_senders = set()
+            for sender in senders:
+                # Remove leading ~ character (WhatsApp group admin indicator)
+                clean_sender = sender.lstrip('~â¯ ').strip()
+                if clean_sender:
+                    clean_senders.add(clean_sender)
+
+            if len(clean_senders) == 0:
+                partner_name = "Unknown"
+            elif len(clean_senders) == 1:
+                partner_name = list(clean_senders)[0]
+            else:
+                # Group chat - create individual conversations instead
+                return None  # Signal that we should use create_conversations_from_group
+
         # Calculate metrics
         metrics = self._calculate_metrics(messages, user_display_name)
-        
+
         # Create conversation
         conversation = Conversation(
             user_id=self.user_id,
@@ -153,7 +311,7 @@ class ChatParser:
             metrics=metrics,
             category=self._categorize_conversation(metrics)
         )
-        
+
         return conversation
     
     def _calculate_metrics(
@@ -261,17 +419,15 @@ class ChatParser:
         return []
     
     def _categorize_conversation(self, metrics: ConversationMetrics) -> str:
-        """Categorize conversation based on metrics"""
-        
-        if metrics.days_since_contact is None:
-            return "general"
-        
-        if metrics.days_since_contact > 30:
-            return "dormant"
-        elif metrics.days_since_contact > 14:
-            return "attention"
-        else:
-            return "active"
+        """Categorize conversation into social groups (family, friends, work)"""
+
+        # For now, default to "friends" since we can't determine relationship type from chat alone
+        # In a future version, we could:
+        # 1. Use AI to analyze conversation content and infer relationship type
+        # 2. Allow users to manually categorize contacts
+        # 3. Use contact metadata if available (e.g., from phone contacts)
+
+        return "friends"  # Default category
     
     def _generate_partner_id(self, partner_name: str) -> str:
         """Generate a unique ID for a conversation partner"""

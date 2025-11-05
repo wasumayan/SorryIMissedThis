@@ -106,20 +106,18 @@ class ApiClient {
   }
 
   // Contacts
-  async getContacts(filters?: {
+  async getContacts(userId: string, filters?: {
     category?: string;
     status?: string;
     search?: string;
   }) {
     const params = new URLSearchParams();
+    params.append('userId', userId);
     if (filters?.category) params.append('category', filters.category);
     if (filters?.status) params.append('status', filters.status);
     if (filters?.search) params.append('search', filters.search);
 
-    const queryString = params.toString();
-    const endpoint = queryString ? `/contacts?${queryString}` : '/contacts';
-    
-    return this.request<{ contacts: Contact[]; total: number }>(endpoint);
+    return this.request<{ contacts: Contact[]; total: number }>(`/contacts?${params.toString()}`);
   }
 
   async getContact(id: string) {
@@ -221,48 +219,52 @@ class ApiClient {
     });
   }
 
-  async getDailySuggestions() {
-    return this.request<{ suggestions: DailySuggestion[] }>('/ai/suggestions/daily');
+  async getDailySuggestions(userId: string) {
+    return this.request<{ suggestions: DailySuggestion[] }>(`/ai/suggestions/daily?userId=${userId}`);
   }
 
   // Analytics
-  async getAnalyticsOverview(period?: string) {
-    const params = period ? `?period=${period}` : '';
-    return this.request<{ overview: AnalyticsOverview }>(`/analytics/overview${params}`);
+  async getAnalyticsOverview(userId: string, period?: string) {
+    const params = new URLSearchParams();
+    params.append('userId', userId);
+    if (period) params.append('period', period);
+    return this.request<{ overview: AnalyticsOverview }>(`/analytics/overview?${params.toString()}`);
   }
 
-  async getContactAnalytics(contactId: string) {
-    return this.request<{ analytics: ContactAnalytics }>(`/analytics/contacts/${contactId}`);
+  async getContactAnalytics(contactId: string, userId: string) {
+    return this.request<{ analytics: ContactAnalytics }>(`/analytics/contacts/${contactId}?userId=${userId}`);
   }
 
-  async getTrends(period?: string) {
-    const params = period ? `?period=${period}` : '';
-    return this.request<{ trends: TrendsData }>(`/analytics/trends${params}`);
+  async getTrends(userId: string, period?: string) {
+    const params = new URLSearchParams();
+    params.append('userId', userId);
+    if (period) params.append('period', period);
+    return this.request<{ trends: TrendsData }>(`/analytics/trends?${params.toString()}`);
   }
 
   // Schedule
-  async getScheduledPrompts(filters?: {
+  async getScheduledPrompts(userId: string, filters?: {
     status?: string;
     limit?: number;
     offset?: number;
   }) {
     const params = new URLSearchParams();
+    params.append('userId', userId);
     if (filters?.status) params.append('status', filters.status);
     if (filters?.limit) params.append('limit', filters.limit.toString());
     if (filters?.offset) params.append('offset', filters.offset.toString());
 
-    const queryString = params.toString();
-    const endpoint = queryString ? `/schedule/prompts?${queryString}` : '/schedule/prompts';
-    
-    return this.request<{ prompts: ScheduledPrompt[]; total: number }>(endpoint);
+    return this.request<{ prompts: ScheduledPrompt[]; total: number }>(`/schedule/prompts?${params.toString()}`);
   }
 
-  async getCatchUpSuggestions(priority?: string) {
-    const params = priority ? `?priority=${priority}` : '';
-    return this.request<{ suggestions: CatchUpSuggestion[]; total: number }>(`/schedule/catch-up${params}`);
+  async getCatchUpSuggestions(userId: string, priority?: string) {
+    const params = new URLSearchParams();
+    params.append('userId', userId);
+    if (priority) params.append('priority', priority);
+    return this.request<{ suggestions: CatchUpSuggestion[]; total: number }>(`/schedule/catch-up?${params.toString()}`);
   }
 
-  async schedulePrompt(promptData: {
+  async schedulePrompt(userId: string, promptData: {
     contactId: string;
     prompt: string;
     scheduledTime: string;
@@ -271,12 +273,12 @@ class ApiClient {
   }) {
     return this.request<{ scheduledPrompt: ScheduledPrompt }>('/schedule/prompts', {
       method: 'POST',
-      body: JSON.stringify(promptData),
+      body: JSON.stringify({ userId, ...promptData }),
     });
   }
 
-  async getCalendarEvents(start: string, end: string) {
-    return this.request<{ events: CalendarEvent[] }>(`/schedule/calendar?start=${start}&end=${end}`);
+  async getCalendarEvents(userId: string, start: string, end: string) {
+    return this.request<{ events: CalendarEvent[] }>(`/schedule/calendar?userId=${userId}&start=${start}&end=${end}`);
   }
 
   // Upload

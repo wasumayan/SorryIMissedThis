@@ -26,6 +26,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   const [error, setError] = useState('');
   const [userData, setUserData] = useState<User | undefined>(undefined);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [chatDisplayName, setChatDisplayName] = useState('');
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'processing' | 'complete' | 'error'>('idle');
 
@@ -94,6 +95,11 @@ export function Onboarding({ onComplete }: OnboardingProps) {
       return;
     }
 
+    if (!chatDisplayName.trim()) {
+      setError('Please enter your name as it appears in the chat');
+      return;
+    }
+
     setUploadStatus('uploading');
     setUploadProgress(30);
     setError('');
@@ -102,7 +108,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
       const response = await apiClient.uploadTranscript(
         uploadFile,
         userData.id,
-        userData.name
+        chatDisplayName.trim()
       );
 
       if (response.success) {
@@ -462,12 +468,31 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                     />
                   </div>
                   {uploadFile && (
-                    <div className="bg-primary/10 border border-primary/20 rounded-lg p-4">
-                      <p className="text-sm text-foreground">Selected: {uploadFile.name}</p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {(uploadFile.size / 1024).toFixed(2)} KB
-                      </p>
-                    </div>
+                    <>
+                      <div className="bg-primary/10 border border-primary/20 rounded-lg p-4">
+                        <p className="text-sm text-foreground">Selected: {uploadFile.name}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {(uploadFile.size / 1024).toFixed(2)} KB
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="chat-display-name" className="text-sm">
+                          Your name in the chat
+                        </Label>
+                        <Input
+                          id="chat-display-name"
+                          type="text"
+                          placeholder="e.g., Jules Mpano"
+                          value={chatDisplayName}
+                          onChange={(e) => setChatDisplayName(e.target.value)}
+                          className="bg-background"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Enter your name exactly as it appears in the chat export (e.g., "Jules Mpano" not "test_13")
+                        </p>
+                      </div>
+                    </>
                   )}
                 </div>
               )}

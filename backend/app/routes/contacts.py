@@ -11,7 +11,7 @@ import uuid
 contacts_bp = Blueprint('contacts', __name__)
 
 
-@contacts_bp.route('/', methods=['GET'])
+@contacts_bp.route('/', methods=['GET', 'OPTIONS'], strict_slashes=False)
 def get_contacts():
     """
     Get all contacts for a user with optional filtering
@@ -25,8 +25,13 @@ def get_contacts():
     Returns:
         List of contacts with their metrics
     """
+    # Handle OPTIONS preflight request
+    if request.method == 'OPTIONS':
+        return jsonify({}), 200
+
     try:
         user_id = request.args.get('userId')
+        print(f"[CONTACTS] Getting contacts for userId: {user_id}")
 
         if not user_id:
             return jsonify({'error': 'userId parameter is required'}), 400
@@ -34,10 +39,18 @@ def get_contacts():
         # Get user to verify exists
         user = storage.get_user_by_id(user_id)
         if not user:
+            print(f"[CONTACTS] User not found: {user_id}")
             return jsonify({'error': 'User not found'}), 404
+
+        print(f"[CONTACTS] User found: {user.get('name', 'Unknown')}")
 
         # Get all conversations for the user (these are our contacts)
         conversations = storage.get_user_conversations(user_id)
+        print(f"[CONTACTS] Found {len(conversations)} conversations for user {user_id}")
+
+        # Debug: Print first conversation if available
+        if conversations:
+            print(f"[CONTACTS] Sample conversation: {conversations[0].get('partnerName', 'Unknown')}, status: {conversations[0].get('status', 'N/A')}")
 
         # Apply filters
         category = request.args.get('category')
@@ -46,21 +59,25 @@ def get_contacts():
 
         contacts = []
         for conv in conversations:
+            # Get last message time
+            last_message_at = conv.get('lastMessageAt')
+
             # Create contact object from conversation
             contact = {
                 'id': conv.get('id'),
                 'name': conv.get('partnerName', 'Unknown'),
                 'category': conv.get('category', 'friends'),
                 'status': conv.get('status', 'healthy'),
-                'size': min(1.0, conv.get('messageCount', 0) / 100),  # Normalize
-                'closeness': conv.get('reciprocity', 0.5),
-                'recency': min(1.0, 1.0 - (conv.get('daysSinceContact', 0) / 30)),  # More recent = higher
+                'size': min(1.0, conv.get('messageCount', 0) / 100),  # Normalize (0-1)
+                'closeness': conv.get('reciprocity', 0.5),  # Reciprocity as closeness (0-1)
+                'recency': max(0, min(1.0, 1.0 - (conv.get('daysSinceContact', 0) / 90))),  # More recent = higher (0-1)
+                'lastContact': f"{conv.get('daysSinceContact', 0)} days ago",  # Human readable
                 'phoneNumber': conv.get('phoneNumber'),
                 'email': conv.get('email'),
                 'platforms': conv.get('platforms', []),
                 'metrics': {
                     'totalMessages': conv.get('messageCount', 0),
-                    'lastContact': conv.get('lastMessageAt'),
+                    'lastContact': last_message_at,  # ISO timestamp
                     'averageResponseTime': conv.get('avgResponseTime', 0),
                     'reciprocity': conv.get('reciprocity', 0),
                     'interactionFrequency': conv.get('interactionFrequency', 0)
@@ -80,6 +97,8 @@ def get_contacts():
 
             contacts.append(contact)
 
+        print(f"[CONTACTS] Returning {len(contacts)} contacts after filtering")
+
         return jsonify({
             'success': True,
             'data': {
@@ -89,7 +108,9 @@ def get_contacts():
         }), 200
 
     except Exception as e:
-        print(f"Error getting contacts: {str(e)}")
+        print(f"[CONTACTS] ERROR: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': 'Internal server error', 'message': str(e)}), 500
 
 

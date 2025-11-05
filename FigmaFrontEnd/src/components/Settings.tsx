@@ -3,22 +3,28 @@ import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Switch } from "./ui/switch";
 import { Label } from "./ui/label";
+import { Input } from "./ui/input";
 import { ScrollArea } from "./ui/scroll-area";
 import { Separator } from "./ui/separator";
 import { Badge } from "./ui/badge";
-import { 
-  ArrowLeft, 
-  Shield, 
-  MessageCircle, 
-  Bell, 
-  Palette, 
+import { Progress } from "./ui/progress";
+import {
+  ArrowLeft,
+  Shield,
+  MessageCircle,
+  Bell,
+  Palette,
   Trash2,
   CheckCircle,
   Moon,
-  Sun
+  Sun,
+  Upload,
+  FileText
 } from "lucide-react";
+import { apiClient, User } from "../services/api";
 
 interface SettingsProps {
+  user: User;
   onBack: () => void;
   darkMode: boolean;
   onToggleDarkMode: () => void;
@@ -26,17 +32,78 @@ interface SettingsProps {
   onSeasonChange?: (season: "spring" | "summer" | "autumn" | "winter") => void;
 }
 
-export function Settings({ 
-  onBack, 
-  darkMode, 
+export function Settings({
+  user,
+  onBack,
+  darkMode,
   onToggleDarkMode,
   season = "summer",
-  onSeasonChange 
+  onSeasonChange
 }: SettingsProps) {
   const [localOnly, setLocalOnly] = useState(true);
   const [reducedMotion, setReducedMotion] = useState(false);
   const [dailyDigest, setDailyDigest] = useState(true);
   const [weeklyReflection, setWeeklyReflection] = useState(true);
+
+  // Upload state
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [chatDisplayName, setChatDisplayName] = useState('');
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
+  const [uploadError, setUploadError] = useState('');
+
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      setUploadFile(file);
+      setUploadStatus('idle');
+      setUploadError('');
+    }
+  };
+
+  const handleUpload = async () => {
+    if (!uploadFile) {
+      setUploadError('Please select a file to upload');
+      return;
+    }
+
+    if (!chatDisplayName.trim()) {
+      setUploadError('Please enter your name as it appears in the chat');
+      return;
+    }
+
+    setUploadStatus('uploading');
+    setUploadProgress(50);
+    setUploadError('');
+
+    try {
+      const response = await apiClient.uploadTranscript(
+        uploadFile,
+        user.id,
+        chatDisplayName.trim()
+      );
+
+      if (response.success) {
+        setUploadStatus('success');
+        setUploadProgress(100);
+
+        // Reset form after 2 seconds
+        setTimeout(() => {
+          setUploadFile(null);
+          setChatDisplayName('');
+          setUploadProgress(0);
+          setUploadStatus('idle');
+        }, 2000);
+      } else {
+        setUploadStatus('error');
+        setUploadError(response.error || 'Upload failed. Please try again.');
+      }
+    } catch (err) {
+      setUploadStatus('error');
+      setUploadError('Upload failed. Please check your connection and try again.');
+      console.error('Upload error:', err);
+    }
+  };
 
   return (
     <div className="h-screen flex flex-col bg-gradient-to-br from-background via-secondary/10 to-accent/5">
@@ -53,8 +120,9 @@ export function Settings({
         </div>
       </div>
 
-      <ScrollArea className="flex-1">
-        <div className="max-w-4xl mx-auto p-6 space-y-6">
+      <div className="flex-1 overflow-hidden">
+        <ScrollArea className="h-full">
+          <div className="max-w-4xl mx-auto p-6 space-y-6">
           {/* Privacy Center */}
           <Card className="p-6 border-2 border-primary/20 shadow-lg">
             <div className="flex items-center gap-3 mb-6">
@@ -183,6 +251,104 @@ export function Settings({
                 </div>
                 <Badge variant="outline">Soon</Badge>
               </div>
+            </div>
+          </Card>
+
+          {/* Upload More Chats */}
+          <Card className="p-6 border-2 border-accent/30">
+            <div className="flex items-center gap-3 mb-6">
+              <Upload className="w-6 h-6 text-primary" />
+              <div>
+                <h3>Upload More Conversations</h3>
+                <p className="text-muted-foreground text-sm">
+                  Add more chat exports to expand your grove
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              {uploadError && (
+                <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3">
+                  <p className="text-destructive text-sm">{uploadError}</p>
+                </div>
+              )}
+
+              {uploadStatus === 'success' && (
+                <div className="bg-primary/10 border border-primary/20 rounded-lg p-3 flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-primary" />
+                  <p className="text-primary text-sm">Upload successful! Your grove has been updated.</p>
+                </div>
+              )}
+
+              {uploadStatus === 'idle' || uploadStatus === 'error' ? (
+                <>
+                  <div className="border-2 border-dashed border-primary/30 rounded-lg p-6 text-center">
+                    <FileText className="w-10 h-10 mx-auto mb-3 text-muted-foreground" />
+                    <p className="text-foreground mb-2">Upload WhatsApp or Telegram chat export</p>
+                    <p className="text-muted-foreground text-sm mb-4">Supports .txt or .zip files</p>
+                    <Label htmlFor="settings-file-upload">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => document.getElementById('settings-file-upload')?.click()}
+                      >
+                        Choose File
+                      </Button>
+                    </Label>
+                    <Input
+                      id="settings-file-upload"
+                      type="file"
+                      accept=".txt,.zip"
+                      onChange={handleFileSelect}
+                      className="hidden"
+                    />
+                  </div>
+
+                  {uploadFile && (
+                    <>
+                      <div className="bg-primary/10 border border-primary/20 rounded-lg p-4">
+                        <p className="text-sm text-foreground font-medium mb-1">{uploadFile.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {(uploadFile.size / 1024).toFixed(2)} KB
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="settings-chat-name" className="text-sm">
+                          Your name in the chat
+                        </Label>
+                        <Input
+                          id="settings-chat-name"
+                          type="text"
+                          placeholder="e.g., Jules Mpano"
+                          value={chatDisplayName}
+                          onChange={(e) => setChatDisplayName(e.target.value)}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Enter your name exactly as it appears in the chat export
+                        </p>
+                      </div>
+
+                      <Button
+                        onClick={handleUpload}
+                        className="w-full"
+                        disabled={!chatDisplayName.trim()}
+                      >
+                        <Upload className="w-4 h-4 mr-2" />
+                        Upload and Process
+                      </Button>
+                    </>
+                  )}
+                </>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-primary">
+                    <CheckCircle className="w-4 h-4" />
+                    <span className="text-sm">Processing your chat...</span>
+                  </div>
+                  <Progress value={uploadProgress} className="h-2" />
+                </div>
+              )}
             </div>
           </Card>
 
@@ -331,8 +497,9 @@ export function Settings({
               </p>
             </div>
           </Card>
-        </div>
-      </ScrollArea>
+          </div>
+        </ScrollArea>
+      </div>
     </div>
   );
 }

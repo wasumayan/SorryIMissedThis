@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { GroveLeaf } from "./GroveLeaf";
 import { RelationshipStatsModal } from "./RelationshipStatsModal";
 import { Button } from "./ui/button";
@@ -7,70 +7,53 @@ import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
 import { ScrollArea } from "./ui/scroll-area";
 import { Droplet, Search, Calendar, TrendingUp } from "lucide-react";
-
-interface Contact {
-  id: string;
-  name: string;
-  category: "family" | "friends" | "work";
-  status: "healthy" | "attention" | "dormant" | "wilted";
-  size: number;
-  lastContact: string;
-  closeness?: number; // 0-1, affects branch thickness
-  recency?: number; // 0-1, affects branch length (higher = more recent)
-}
+import { apiClient, User, Contact, DailySuggestion } from "../services/api";
 
 interface GroveDashboardProps {
+  user: User;
   onContactSelect: (contact: Contact) => void;
   onViewAnalytics: () => void;
   onViewSchedule: () => void;
 }
 
-// Mock contact data with closeness and recency
-const generateContacts = (): Contact[] => {
-  const names = [
-    { name: "Mom", category: "family" as const },
-    { name: "Dad", category: "family" as const },
-    { name: "Sarah", category: "friends" as const },
-    { name: "Mike", category: "friends" as const },
-    { name: "Jessica", category: "friends" as const },
-    { name: "Alex Chen", category: "work" as const },
-    { name: "Emma Wilson", category: "work" as const },
-    { name: "Tom", category: "friends" as const },
-    { name: "Lisa", category: "family" as const },
-    { name: "David Park", category: "work" as const },
-    { name: "Rachel", category: "friends" as const },
-    { name: "Uncle John", category: "family" as const },
-    { name: "Priya", category: "friends" as const },
-    { name: "James Lee", category: "work" as const },
-    { name: "Sophie", category: "friends" as const },
-  ];
-
-  const statuses: Array<"healthy" | "attention" | "dormant" | "wilted"> = [
-    "healthy",
-    "healthy",
-    "healthy",
-    "attention",
-    "attention",
-    "dormant",
-    "wilted",
-  ];
-
-  return names.map((contact, i) => ({
-    id: `contact-${i}`,
-    ...contact,
-    status: statuses[i % statuses.length],
-    size: 0.3 + Math.random() * 0.7,
-    lastContact: `${Math.floor(Math.random() * 30) + 1} days ago`,
-    closeness: 0.3 + Math.random() * 0.7, // High = thick branch
-    recency: Math.random(), // High = shorter branch (more recent)
-  }));
-};
-
-export function GroveDashboard({ onContactSelect, onViewAnalytics, onViewSchedule }: GroveDashboardProps) {
-  const [contacts] = useState<Contact[]>(generateContacts());
+export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewSchedule }: GroveDashboardProps) {
+  const [contacts, setContacts] = useState<Contact[]>([]);
   const [activeFilter, setActiveFilter] = useState<string>("All");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
+  const [suggestions, setSuggestions] = useState<DailySuggestion[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Fetch contacts and suggestions on mount
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setIsLoading(true);
+
+        // Fetch contacts
+        const contactsResponse = await apiClient.getContacts(user.id);
+
+        if (contactsResponse.success && contactsResponse.data) {
+          setContacts(contactsResponse.data.contacts);
+        } else {
+          console.error('[GROVE] Failed to get contacts:', contactsResponse);
+        }
+
+        // Fetch daily suggestions
+        const suggestionsResponse = await apiClient.getDailySuggestions(user.id);
+
+        if (suggestionsResponse.success && suggestionsResponse.data) {
+          setSuggestions(suggestionsResponse.data.suggestions);
+        }
+      } catch (error) {
+        console.error('[GROVE] Error fetching data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [user.id]);
 
   const filters = ["All", "Family", "Friends", "Work", "Dormant", "Priority"];
 
@@ -88,22 +71,26 @@ export function GroveDashboard({ onContactSelect, onViewAnalytics, onViewSchedul
   const layoutContacts = (contacts: Contact[]) => {
     const centerX = 500;
     const centerY = 350;
-    const categoryAngles = { 
+    const categoryAngles: Record<string, number> = {
       family: -70,
-      friends: 0, 
-      work: 70 
+      friends: 0,
+      work: 70
     };
 
     return contacts.map((contact, i) => {
-      const baseAngle = categoryAngles[contact.category];
+      // Default to friends if category is unknown
+      const baseAngle = categoryAngles[contact.category] ?? categoryAngles.friends;
       const spread = 35;
       const angleOffset = (i % 5) * spread - spread * 2;
       const angle = ((baseAngle + angleOffset) * Math.PI) / 180;
-      
+
+      // Calculate recency from metrics
+      const recency = contact.recency || 0.5;
+
       // Distance based on recency - more recent = shorter (closer)
       const baseDistance = 120;
       const maxDistance = 280;
-      const distance = baseDistance + (1 - (contact.recency || 0.5)) * (maxDistance - baseDistance);
+      const distance = baseDistance + (1 - recency) * (maxDistance - baseDistance);
 
       return {
         ...contact,
@@ -142,7 +129,7 @@ export function GroveDashboard({ onContactSelect, onViewAnalytics, onViewSchedul
           {/* Header */}
           <div className="border-b bg-card/50 backdrop-blur-sm px-6 py-4 flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <h2 className="text-primary">Your Grove</h2>
+              <h2 className="text-primary">{user.name}'s Grove</h2>
               <div className="flex gap-2">
                 {filters.map((filter) => (
                   <Button
@@ -188,7 +175,7 @@ export function GroveDashboard({ onContactSelect, onViewAnalytics, onViewSchedul
               </svg>
             </div>
 
-            <svg className="w-full h-full" style={{ minHeight: '700px' }}>
+            <svg className="w-full h-full" style={{ minHeight: '700px' }} viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid meet">
               {/* Watering can (you) in the center */}
               <defs>
                 <radialGradient id="water-glow">
@@ -284,6 +271,21 @@ export function GroveDashboard({ onContactSelect, onViewAnalytics, onViewSchedul
                 You
               </text>
 
+              {/* Empty state message */}
+              {contacts.length === 0 && !isLoading && (
+                <text
+                  x="500"
+                  y="280"
+                  textAnchor="middle"
+                  fill="currentColor"
+                  fontSize="16"
+                  fontWeight="500"
+                  opacity="0.6"
+                >
+                  Upload a chat to grow your grove
+                </text>
+              )}
+
               {/* Branch + Leaf pairs - render together to ensure 1:1 correspondence */}
               {layoutedContacts.map((contact) => {
                 // Branch properties based on relationship
@@ -373,49 +375,44 @@ export function GroveDashboard({ onContactSelect, onViewAnalytics, onViewSchedul
                 </p>
 
                 <div className="space-y-3 mt-4">
-                  {attentionCount > 0 && (
-                    <Card className="p-4 border-l-4 hover:shadow-md transition-shadow cursor-pointer" style={{ borderLeftColor: '#f59e0b' }}>
-                      <div className="flex items-start gap-3">
-                        <div className="w-2 h-2 rounded-full mt-2" style={{ backgroundColor: '#f59e0b' }} />
-                        <div className="flex-1">
-                          <p className="text-foreground" style={{ fontSize: '0.875rem' }}>
-                            <strong>Sarah</strong> mentioned her job interview 2 weeks ago
-                          </p>
-                          <p className="text-muted-foreground mt-1" style={{ fontSize: '0.75rem' }}>
-                            Ask how it went
-                          </p>
-                        </div>
-                      </div>
+                  {isLoading ? (
+                    <Card className="p-4">
+                      <p className="text-muted-foreground text-sm">Loading suggestions...</p>
+                    </Card>
+                  ) : suggestions.length > 0 ? (
+                    suggestions.slice(0, 3).map((suggestion, index) => {
+                      const priorityColors = {
+                        high: '#f59e0b',
+                        medium: '#06b6d4',
+                        low: '#10b981'
+                      };
+                      const color = priorityColors[suggestion.priority] || '#06b6d4';
+
+                      return (
+                        <Card
+                          key={index}
+                          className="p-4 border-l-4 hover:shadow-md transition-shadow cursor-pointer"
+                          style={{ borderLeftColor: color }}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="w-2 h-2 rounded-full mt-2" style={{ backgroundColor: color }} />
+                            <div className="flex-1">
+                              <p className="text-foreground" style={{ fontSize: '0.875rem' }}>
+                                <strong>{suggestion.contact.name}</strong>: {suggestion.suggestion.text}
+                              </p>
+                              <p className="text-muted-foreground mt-1" style={{ fontSize: '0.75rem' }}>
+                                {suggestion.suggestion.reason}
+                              </p>
+                            </div>
+                          </div>
+                        </Card>
+                      );
+                    })
+                  ) : (
+                    <Card className="p-4">
+                      <p className="text-muted-foreground text-sm">No suggestions for today - you're all caught up!</p>
                     </Card>
                   )}
-
-                  <Card className="p-4 border-l-4 border-primary hover:shadow-md transition-shadow cursor-pointer">
-                    <div className="flex items-start gap-3">
-                      <div className="w-2 h-2 rounded-full bg-primary mt-2" />
-                      <div className="flex-1">
-                        <p className="text-foreground" style={{ fontSize: '0.875rem' }}>
-                          <strong>Mom's</strong> birthday is in 3 days
-                        </p>
-                        <p className="text-muted-foreground mt-1" style={{ fontSize: '0.75rem' }}>
-                          Plan something special
-                        </p>
-                      </div>
-                    </div>
-                  </Card>
-
-                  <Card className="p-4 border-l-4 hover:shadow-md transition-shadow cursor-pointer" style={{ borderLeftColor: '#10b981' }}>
-                    <div className="flex items-start gap-3">
-                      <div className="w-2 h-2 rounded-full mt-2" style={{ backgroundColor: '#10b981' }} />
-                      <div className="flex-1">
-                        <p className="text-foreground" style={{ fontSize: '0.875rem' }}>
-                          <strong>Mike</strong> shared good news last week
-                        </p>
-                        <p className="text-muted-foreground mt-1" style={{ fontSize: '0.75rem' }}>
-                          Follow up and celebrate
-                        </p>
-                      </div>
-                    </div>
-                  </Card>
                 </div>
               </div>
 

@@ -1,62 +1,48 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { ScrollArea } from "./ui/scroll-area";
 import { Calendar } from "./ui/calendar";
 import { ArrowLeft, Calendar as CalendarIcon, Clock, User, Droplet } from "lucide-react";
+import { apiClient, User as UserType, ScheduledPrompt, CatchUpSuggestion } from "../services/api";
 
 interface ScheduleProps {
+  user: UserType;
   onBack: () => void;
 }
 
-export function Schedule({ onBack }: ScheduleProps) {
+export function Schedule({ user, onBack }: ScheduleProps) {
   const [date, setDate] = useState<Date | undefined>(new Date());
+  const [scheduledPrompts, setScheduledPrompts] = useState<ScheduledPrompt[]>([]);
+  const [catchUpSuggestions, setCatchUpSuggestions] = useState<CatchUpSuggestion[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const scheduledPrompts = [
-    {
-      id: "1",
-      contact: "Tom",
-      time: "This Evening",
-      prompt: "Check in about his new project",
-      status: "pending" as const,
-    },
-    {
-      id: "2",
-      contact: "Priya",
-      time: "Tomorrow, 10:00 AM",
-      prompt: "Follow up on weekend plans",
-      status: "pending" as const,
-    },
-    {
-      id: "3",
-      contact: "Uncle John",
-      time: "Friday, 3:00 PM",
-      prompt: "Birthday wishes and catch up",
-      status: "pending" as const,
-    },
-  ];
+  useEffect(() => {
+    const fetchScheduleData = async () => {
+      try {
+        setIsLoading(true);
 
-  const catchUpSuggestions = [
-    {
-      contact: "Lisa",
-      lastContact: "3 weeks ago",
-      unreadMessages: 0,
-      priority: "medium" as const,
-    },
-    {
-      contact: "David Park",
-      lastContact: "1 month ago",
-      unreadMessages: 2,
-      priority: "high" as const,
-    },
-    {
-      contact: "Sophie",
-      lastContact: "2 weeks ago",
-      unreadMessages: 0,
-      priority: "low" as const,
-    },
-  ];
+        // Fetch scheduled prompts
+        const promptsResponse = await apiClient.getScheduledPrompts(user.id, { status: 'pending' });
+        if (promptsResponse.success && promptsResponse.data) {
+          setScheduledPrompts(promptsResponse.data.prompts);
+        }
+
+        // Fetch catch-up suggestions
+        const suggestionsResponse = await apiClient.getCatchUpSuggestions(user.id);
+        if (suggestionsResponse.success && suggestionsResponse.data) {
+          setCatchUpSuggestions(suggestionsResponse.data.suggestions);
+        }
+      } catch (error) {
+        console.error('Error fetching schedule data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchScheduleData();
+  }, [user.id]);
 
   const priorityColors = {
     high: "#f87171",
@@ -111,35 +97,50 @@ export function Schedule({ onBack }: ScheduleProps) {
                 </p>
 
                 <div className="space-y-3 mt-4">
-                  {scheduledPrompts.map((item) => (
-                    <Card key={item.id} className="p-4 hover:shadow-md transition-shadow">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
-                            <User className="w-4 h-4 text-primary" />
-                            <span className="font-medium">{item.contact}</span>
-                            <Badge variant="outline" className="text-xs">
-                              {item.time}
-                            </Badge>
-                          </div>
-                          <p className="text-muted-foreground" style={{ fontSize: '0.875rem' }}>
-                            {item.prompt}
-                          </p>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button variant="outline" size="sm">
-                            Edit
-                          </Button>
-                          <Button size="sm" className="gap-1">
-                            <Droplet className="w-3 h-3" />
-                            Water Now
-                          </Button>
-                        </div>
-                      </div>
+                  {isLoading ? (
+                    <Card className="p-4">
+                      <p className="text-muted-foreground text-sm">Loading prompts...</p>
                     </Card>
-                  ))}
+                  ) : scheduledPrompts.length > 0 ? (
+                    scheduledPrompts.map((item) => {
+                      const scheduledDate = new Date(item.scheduledTime);
+                      const timeString = scheduledDate.toLocaleString('en-US', {
+                        weekday: 'short',
+                        month: 'short',
+                        day: 'numeric',
+                        hour: 'numeric',
+                        minute: '2-digit'
+                      });
 
-                  {scheduledPrompts.length === 0 && (
+                      return (
+                        <Card key={item.id} className="p-4 hover:shadow-md transition-shadow">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-2">
+                                <User className="w-4 h-4 text-primary" />
+                                <span className="font-medium">{item.contact.name}</span>
+                                <Badge variant="outline" className="text-xs">
+                                  {timeString}
+                                </Badge>
+                              </div>
+                              <p className="text-muted-foreground" style={{ fontSize: '0.875rem' }}>
+                                {item.prompt}
+                              </p>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button variant="outline" size="sm">
+                                Edit
+                              </Button>
+                              <Button size="sm" className="gap-1">
+                                <Droplet className="w-3 h-3" />
+                                Water Now
+                              </Button>
+                            </div>
+                          </div>
+                        </Card>
+                      );
+                    })
+                  ) : (
                     <Card className="p-8 text-center">
                       <Clock className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
                       <p className="text-muted-foreground">No scheduled prompts</p>
@@ -163,7 +164,8 @@ export function Schedule({ onBack }: ScheduleProps) {
             </p>
           </div>
 
-          <ScrollArea className="flex-1 p-6">
+          <div className="flex-1 overflow-hidden">
+            <ScrollArea className="h-full p-6">
             <div className="space-y-4">
               <div className="space-y-2">
                 <p className="text-muted-foreground" style={{ fontSize: '0.875rem' }}>
@@ -172,37 +174,47 @@ export function Schedule({ onBack }: ScheduleProps) {
               </div>
 
               <div className="space-y-3 mt-6">
-                {catchUpSuggestions.map((item, index) => (
-                  <Card
-                    key={index}
-                    className="p-4 hover:shadow-md transition-shadow cursor-pointer border-l-4"
-                    style={{ borderLeftColor: priorityColors[item.priority] }}
-                  >
-                    <div className="space-y-3">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <p className="font-medium">{item.contact}</p>
-                          <p className="text-muted-foreground" style={{ fontSize: '0.75rem' }}>
-                            Last contact: {item.lastContact}
-                          </p>
-                        </div>
-                        {item.unreadMessages > 0 && (
-                          <Badge variant="secondary">{item.unreadMessages} unread</Badge>
-                        )}
-                      </div>
-
-                      <div className="flex gap-2">
-                        <Button size="sm" variant="outline" className="flex-1">
-                          Skip
-                        </Button>
-                        <Button size="sm" className="flex-1 gap-1">
-                          <Droplet className="w-3 h-3" />
-                          Review
-                        </Button>
-                      </div>
-                    </div>
+                {isLoading ? (
+                  <Card className="p-4">
+                    <p className="text-muted-foreground text-sm">Loading suggestions...</p>
                   </Card>
-                ))}
+                ) : catchUpSuggestions.length > 0 ? (
+                  catchUpSuggestions.map((item, index) => (
+                    <Card
+                      key={index}
+                      className="p-4 hover:shadow-md transition-shadow cursor-pointer border-l-4"
+                      style={{ borderLeftColor: priorityColors[item.priority] }}
+                    >
+                      <div className="space-y-3">
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <p className="font-medium">{item.contact.name}</p>
+                            <p className="text-muted-foreground" style={{ fontSize: '0.75rem' }}>
+                              Last contact: {item.context.lastContact}
+                            </p>
+                          </div>
+                          {item.unreadMessages > 0 && (
+                            <Badge variant="secondary">{item.unreadMessages} unread</Badge>
+                          )}
+                        </div>
+
+                        <div className="flex gap-2">
+                          <Button size="sm" variant="outline" className="flex-1">
+                            Skip
+                          </Button>
+                          <Button size="sm" className="flex-1 gap-1">
+                            <Droplet className="w-3 h-3" />
+                            Review
+                          </Button>
+                        </div>
+                      </div>
+                    </Card>
+                  ))
+                ) : (
+                  <Card className="p-4">
+                    <p className="text-muted-foreground text-sm">No catch-up suggestions</p>
+                  </Card>
+                )}
               </div>
 
               {/* Session Info */}
@@ -230,6 +242,7 @@ export function Schedule({ onBack }: ScheduleProps) {
               </div>
             </div>
           </ScrollArea>
+          </div>
         </div>
       </div>
     </div>
