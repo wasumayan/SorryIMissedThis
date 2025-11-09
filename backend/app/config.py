@@ -27,7 +27,8 @@ class Config:
     CORS_ORIGINS = os.getenv('CORS_ORIGINS', 'http://localhost:3000').split(',')
     
     # OpenAI
-    OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+    # Check both OPENAI_API_KEY and AZURE_OPENAI_API_KEY for compatibility
+    OPENAI_API_KEY = os.getenv('OPENAI_API_KEY') or os.getenv('AZURE_OPENAI_API_KEY')
     OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4')
     OPENAI_MAX_TOKENS = int(os.getenv('OPENAI_MAX_TOKENS', 500))
     OPENAI_TEMPERATURE = float(os.getenv('OPENAI_TEMPERATURE', 0.7))
