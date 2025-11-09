@@ -89,6 +89,9 @@ def _build_mock_recommendations(user_id: str, category: str, regenerate: bool = 
     # Optionally generate prompts via AI using the synthetic conversation
     generated_prompts: List[Dict[str, Any]] = []
     if regenerate:
+        print("PRINT 4.7: _build_mock_recommendations called with regenerate=True, calling ai_service.generate_prompts", flush=True)
+        current_app.logger.info(
+            "PRINT 4.7: _build_mock_recommendations called with regenerate=True, calling ai_service.generate_prompts")
         try:
             simt_messages = [
                 SimtMessage(
@@ -202,12 +205,17 @@ def get_recommendations():
     Returns:
         JSON with conversation recommendations
     """
-
+    print("PRINT 3: get_recommendations() called", flush=True)
+    current_app.logger.info("PRINT 3: get_recommendations() called")
     try:
         # Get parameters
         user_id = request.args.get('user_id')
         category = request.args.get('category', 'all')
         regenerate = request.args.get('regenerate', 'false').lower() == 'true'
+        print(
+            f"PRINT 4: Parameters - user_id={user_id}, category={category}, regenerate={regenerate}", flush=True)
+        current_app.logger.info(
+            f"PRINT 4: Parameters - user_id={user_id}, category={category}, regenerate={regenerate}")
 
         if not user_id:
             return jsonify({'error': 'user_id parameter is required'}), 400
@@ -223,6 +231,10 @@ def get_recommendations():
 
         if not user:
             if not _storage_has_persistence():
+                print(
+                    "PRINT 4.5: No user found, no persistence - using mock recommendations", flush=True)
+                current_app.logger.info(
+                    "PRINT 4.5: No user found, no persistence - using mock recommendations")
                 return jsonify(_build_mock_recommendations(user_id, category, regenerate)), 200
             return jsonify({'error': 'User not found'}), 404
 
@@ -239,6 +251,10 @@ def get_recommendations():
 
         if not conversations:
             if not _storage_has_persistence():
+                print(
+                    "PRINT 4.6: No conversations found, no persistence - using mock recommendations", flush=True)
+                current_app.logger.info(
+                    "PRINT 4.6: No conversations found, no persistence - using mock recommendations")
                 return jsonify(_build_mock_recommendations(user_id, category, regenerate)), 200
 
             return jsonify({
@@ -256,8 +272,16 @@ def get_recommendations():
 
             # Get existing prompts or generate new ones
             if regenerate:
+                print(
+                    f"PRINT 5: About to call ai_service.generate_prompts() for conversation {conversation_id}", flush=True)
+                current_app.logger.info(
+                    f"PRINT 5: About to call ai_service.generate_prompts() for conversation {conversation_id}")
                 prompts = ai_service.generate_prompts(
                     conversation, num_prompts=3)
+                print(
+                    f"PRINT 6: Returned from ai_service.generate_prompts(), got {len(prompts)} prompts", flush=True)
+                current_app.logger.info(
+                    f"PRINT 6: Returned from ai_service.generate_prompts(), got {len(prompts)} prompts")
                 for prompt in prompts:
                     prompt.conversation_id = conversation_id
                     storage.save_prompt(prompt)
@@ -267,8 +291,16 @@ def get_recommendations():
 
                 # Generate if no unused prompts available
                 if not prompts:
+                    print(
+                        f"PRINT 5: About to call ai_service.generate_prompts() for conversation {conversation_id} (no unused prompts)", flush=True)
+                    current_app.logger.info(
+                        f"PRINT 5: About to call ai_service.generate_prompts() for conversation {conversation_id} (no unused prompts)")
                     prompts = ai_service.generate_prompts(
                         conversation, num_prompts=3)
+                    print(
+                        f"PRINT 6: Returned from ai_service.generate_prompts(), got {len(prompts)} prompts", flush=True)
+                    current_app.logger.info(
+                        f"PRINT 6: Returned from ai_service.generate_prompts(), got {len(prompts)} prompts")
                     for prompt in prompts:
                         prompt.conversation_id = conversation_id
                         storage.save_prompt(prompt)
@@ -313,6 +345,8 @@ def get_recommendations():
             reverse=True
         )
 
+        print("PRINT 22: Returning recommendations response", flush=True)
+        current_app.logger.info("PRINT 22: Returning recommendations response")
         return jsonify({
             'user_id': user_id,
             'category': category,

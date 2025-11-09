@@ -59,11 +59,13 @@ def _print_prompts(prompts: List[Dict[str, Any]]) -> None:
 
 def show_recommendations() -> bool:
     try:
+        print("PRINT 1: Making GET request to recommendations endpoint")
         response = requests.get(
             RECOMMENDATIONS_ENDPOINT,
             params={"user_id": TEST_USER_ID, "regenerate": "true"},
             timeout=15,
         )
+        print("PRINT 2: Received response from recommendations endpoint")
 
         if response.status_code != 200:
             print(
