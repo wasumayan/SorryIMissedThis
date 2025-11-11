@@ -1,0 +1,22 @@
+{
+  "name": "simt-photon-bridge",
+  "version": "1.0.0",
+  "description": "Bridge service for Photon iMessage SDK to Python backend",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "@photon-ai/imessage-kit": "^2.0.0",
+    "better-sqlite3": "^11.0.0",
+    "axios": "^1.6.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

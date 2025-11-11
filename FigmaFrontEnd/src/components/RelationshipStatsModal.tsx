@@ -30,29 +30,38 @@ export function RelationshipStatsModal({
   onSendMessage,
   onWaterContact 
 }: RelationshipStatsModalProps) {
-  if (!contact) return null;
+  console.log('[MODAL] Render called with contact:', contact ? `${contact.name} (${contact.id})` : 'null');
+  
+  if (!contact) {
+    console.log('[MODAL] No contact provided, not rendering');
+    return null;
+  }
+  
+  console.log('[MODAL] Rendering modal for contact:', contact.name, contact.id);
 
-  // Generate mock stats
+  // Use real contact data
   const stats = {
-    messageCount: contact.messageCount || Math.floor(Math.random() * 200) + 50,
-    reciprocityScore: contact.reciprocityScore || Math.floor(Math.random() * 40) + 60,
-    daysConnected: contact.daysConnected || Math.floor(Math.random() * 500) + 100,
-    lastTopics: ["Weekend plans", "Work updates", "Family news"],
-    responseTime: "Usually replies in 2-4 hours",
+    messageCount: contact.messageCount || contact.metrics?.totalMessages || 0,
+    reciprocityScore: Math.round((contact.reciprocityScore || contact.metrics?.reciprocity || 0.5) * 100),
+    daysConnected: contact.daysConnected || contact.metrics?.daysSinceContact || 0,
+    lastTopics: contact.metrics?.commonTopics || contact.aiAnalysis?.topics?.slice(0, 3).map((t: any) => t.topic || t) || [],
+    responseTime: contact.metrics?.avgResponseTime 
+      ? `Usually replies in ${Math.round(contact.metrics.avgResponseTime)} hours`
+      : "Response time data not available",
     connectionStrength: contact.status === "healthy" ? "Strong" : 
                         contact.status === "attention" ? "Good" :
                         contact.status === "dormant" ? "Fading" : "Weak",
   };
 
-  // Generate contextual prompt
-  const prompts = {
+  // Use real prompts from contact if available, otherwise use contextual defaults
+  const defaultPrompts = {
     healthy: [
-      `Share a funny meme ${contact.name} would love`,
-      `Ask about their weekend plans`,
-      `Send appreciation for recent conversation`,
+      `Share something ${contact.name} would appreciate`,
+      `Ask about their recent updates`,
+      `Send appreciation for the connection`,
     ],
     attention: [
-      `Follow up on what ${contact.name} mentioned last time`,
+      `Follow up on what ${contact.name} mentioned`,
       `Check in on how things are going`,
       `Share something that reminded you of them`,
     ],
@@ -68,7 +77,7 @@ export function RelationshipStatsModal({
     ],
   };
 
-  const currentPrompts = prompts[contact.status];
+  const currentPrompts = contact.suggestedPrompts || defaultPrompts[contact.status] || [];
   
   // Health-based colors instead of category colors
   const healthColors = {
@@ -192,11 +201,15 @@ export function RelationshipStatsModal({
                   <h4>Recent Topics</h4>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {stats.lastTopics.map((topic, i) => (
+                  {stats.lastTopics.length > 0 ? (
+                    stats.lastTopics.map((topic, i) => (
                     <Badge key={i} variant="secondary">
-                      {topic}
+                        {typeof topic === 'string' ? topic : (topic.topic || topic)}
                     </Badge>
-                  ))}
+                    ))
+                  ) : (
+                    <p className="text-muted-foreground text-sm">No topic data available</p>
+                  )}
                 </div>
               </div>
 
@@ -216,7 +229,8 @@ export function RelationshipStatsModal({
                   <h4>Suggested Messages</h4>
                 </div>
                 <div className="space-y-2">
-                  {currentPrompts.map((prompt, i) => (
+                  {currentPrompts.length > 0 ? (
+                    currentPrompts.map((prompt, i) => (
                     <motion.div
                       key={i}
                       initial={{ opacity: 0, x: -20 }}
@@ -236,7 +250,10 @@ export function RelationshipStatsModal({
                         </div>
                       </Card>
                     </motion.div>
-                  ))}
+                    ))
+                  ) : (
+                    <p className="text-muted-foreground text-sm">No prompts available</p>
+                  )}
                 </div>
               </div>
 
@@ -250,7 +267,7 @@ export function RelationshipStatsModal({
                   }}
                 >
                   <Send className="w-4 h-4 mr-2" />
-                  Open in WhatsApp
+                  Send Message
                 </Button>
                 {(contact.status === "dormant" || contact.status === "wilted" || contact.status === "attention") && onWaterContact && (
                   <Button 

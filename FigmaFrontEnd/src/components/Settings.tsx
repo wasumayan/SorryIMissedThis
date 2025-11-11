@@ -19,7 +19,9 @@ import {
   Moon,
   Sun,
   Upload,
-  FileText
+  FileText,
+  Database,
+  Settings as SettingsIcon
 } from "lucide-react";
 import { apiClient, User } from "../services/api";
 
@@ -44,6 +46,15 @@ export function Settings({
   const [reducedMotion, setReducedMotion] = useState(false);
   const [dailyDigest, setDailyDigest] = useState(true);
   const [weeklyReflection, setWeeklyReflection] = useState(true);
+  
+  // Chat tracking preferences
+  const [chatTrackingMode, setChatTrackingMode] = useState<'all' | 'recent' | 'selected'>(
+    user.preferences?.chatTracking?.mode || 'all'
+  );
+  const [maxChats, setMaxChats] = useState<number>(
+    user.preferences?.chatTracking?.maxChats || 50
+  );
+  const [savingChatTracking, setSavingChatTracking] = useState(false);
 
   // Upload state
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -58,6 +69,37 @@ export function Settings({
       setUploadFile(file);
       setUploadStatus('idle');
       setUploadError('');
+    }
+  };
+
+  const handleChatTrackingSave = async () => {
+    setSavingChatTracking(true);
+    try {
+      // Build chatTracking object, only including relevant fields
+      const chatTracking: {
+        mode: 'all' | 'recent' | 'selected';
+        maxChats?: number;
+        selectedChatGuids?: string[];
+      } = {
+        mode: chatTrackingMode
+      };
+      
+      if (chatTrackingMode === 'recent' && maxChats !== undefined) {
+        chatTracking.maxChats = maxChats;
+      }
+      
+      if (chatTrackingMode === 'selected') {
+        // For 'selected' mode, we need selectedChatGuids
+        // If not set, use empty array (user needs to select chats)
+        chatTracking.selectedChatGuids = []; // TODO: Add UI to select chats in Settings
+      }
+      
+      await apiClient.updateChatTrackingPreferences(user.id, chatTracking);
+      // Show success message
+      setTimeout(() => setSavingChatTracking(false), 1000);
+    } catch (error) {
+      console.error('Error saving chat tracking preferences:', error);
+      setSavingChatTracking(false);
     }
   };
 
@@ -139,7 +181,7 @@ export function Settings({
                     Local-Only Mode
                   </Label>
                   <p className="text-muted-foreground mt-1" style={{ fontSize: '0.875rem' }}>
-                    All data stays on your device. No cloud sync or external storage.
+                    All message content stays on your device. Only analysis and metadata are synced to cloud.
                   </p>
                 </div>
                 <Switch
@@ -189,6 +231,104 @@ export function Settings({
             </div>
           </Card>
 
+          {/* Chat Tracking Preferences */}
+          <Card className="p-6 border-2 border-primary/20">
+            <div className="flex items-center gap-3 mb-6">
+              <Database className="w-6 h-6 text-primary" />
+              <div>
+                <h3>iMessage Chat Tracking</h3>
+                <p className="text-muted-foreground text-sm">
+                  Control which conversations are tracked to save compute and storage
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <Label className="mb-3 block">Tracking Mode</Label>
+                <div className="space-y-3">
+                  <div className="flex items-start gap-3 p-4 border rounded-lg cursor-pointer hover:bg-secondary/30"
+                    onClick={() => setChatTrackingMode('all')}>
+                    <input
+                      type="radio"
+                      name="tracking-mode"
+                      checked={chatTrackingMode === 'all'}
+                      onChange={() => setChatTrackingMode('all')}
+                      className="mt-1"
+                    />
+                    <div className="flex-1">
+                      <Label className="cursor-pointer font-medium">Track All Chats</Label>
+                      <p className="text-muted-foreground text-sm mt-1">
+                        Keep track of all iMessage conversations. Uses more storage and compute.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3 p-4 border rounded-lg cursor-pointer hover:bg-secondary/30"
+                    onClick={() => setChatTrackingMode('recent')}>
+                    <input
+                      type="radio"
+                      name="tracking-mode"
+                      checked={chatTrackingMode === 'recent'}
+                      onChange={() => setChatTrackingMode('recent')}
+                      className="mt-1"
+                    />
+                    <div className="flex-1">
+                      <Label className="cursor-pointer font-medium">Track Most Recent</Label>
+                      <p className="text-muted-foreground text-sm mt-1">
+                        Only track the most recent conversations to save resources.
+                      </p>
+                      {chatTrackingMode === 'recent' && (
+                        <div className="mt-3">
+                          <Label htmlFor="max-chats" className="text-sm">Number of chats to track:</Label>
+                          <Input
+                            id="max-chats"
+                            type="number"
+                            min="1"
+                            max="200"
+                            value={maxChats}
+                            onChange={(e) => setMaxChats(parseInt(e.target.value) || 50)}
+                            className="mt-1 w-32"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3 p-4 border rounded-lg cursor-pointer hover:bg-secondary/30"
+                    onClick={() => setChatTrackingMode('selected')}>
+                    <input
+                      type="radio"
+                      name="tracking-mode"
+                      checked={chatTrackingMode === 'selected'}
+                      onChange={() => setChatTrackingMode('selected')}
+                      className="mt-1"
+                    />
+                    <div className="flex-1">
+                      <Label className="cursor-pointer font-medium">Track Selected Chats Only</Label>
+                      <p className="text-muted-foreground text-sm mt-1">
+                        Manually select which conversations to track. Most efficient option.
+                      </p>
+                      {chatTrackingMode === 'selected' && (
+                        <p className="text-muted-foreground text-xs mt-2">
+                          You can select chats during sync or from the Grove view.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <Button
+                onClick={handleChatTrackingSave}
+                disabled={savingChatTracking}
+                className="w-full"
+              >
+                {savingChatTracking ? 'Saving...' : 'Save Chat Tracking Preferences'}
+              </Button>
+            </div>
+          </Card>
+
           {/* Platform Integrations */}
           <Card className="p-6">
             <div className="flex items-center gap-3 mb-6">
@@ -199,13 +339,13 @@ export function Settings({
             <div className="space-y-4">
               <div className="flex items-center justify-between p-4 bg-secondary/30 rounded-lg">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-[#25D366] flex items-center justify-center">
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center">
                     <MessageCircle className="w-5 h-5 text-white" />
                   </div>
                   <div>
-                    <p className="font-medium">WhatsApp</p>
+                    <p className="font-medium">iMessage</p>
                     <p className="text-muted-foreground" style={{ fontSize: '0.875rem' }}>
-                      Connected via Web protocol
+                      Connected via Photon SDK
                     </p>
                   </div>
                 </div>
@@ -219,49 +359,17 @@ export function Settings({
                   </Button>
                 </div>
               </div>
-
-              <div className="flex items-center justify-between p-4 bg-secondary/30 rounded-lg">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-[#0088cc] flex items-center justify-center">
-                    <MessageCircle className="w-5 h-5 text-white" />
-                  </div>
-                  <div>
-                    <p className="font-medium">Telegram</p>
-                    <p className="text-muted-foreground" style={{ fontSize: '0.875rem' }}>
-                      Not connected
-                    </p>
-                  </div>
-                </div>
-                <Button variant="outline" size="sm">
-                  Connect
-                </Button>
-              </div>
-
-              <div className="flex items-center justify-between p-4 bg-secondary/30 rounded-lg opacity-50">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
-                    <MessageCircle className="w-5 h-5 text-muted-foreground" />
-                  </div>
-                  <div>
-                    <p className="font-medium">iMessage</p>
-                    <p className="text-muted-foreground" style={{ fontSize: '0.875rem' }}>
-                      macOS only - Coming soon
-                    </p>
-                  </div>
-                </div>
-                <Badge variant="outline">Soon</Badge>
-              </div>
             </div>
           </Card>
 
-          {/* Upload More Chats */}
+          {/* iMessage Sync */}
           <Card className="p-6 border-2 border-accent/30">
             <div className="flex items-center gap-3 mb-6">
-              <Upload className="w-6 h-6 text-primary" />
+              <MessageCircle className="w-6 h-6 text-primary" />
               <div>
-                <h3>Upload More Conversations</h3>
+                <h3>Sync iMessage Conversations</h3>
                 <p className="text-muted-foreground text-sm">
-                  Add more chat exports to expand your grove
+                  Sync your iMessage conversations to expand your grove
                 </p>
               </div>
             </div>
@@ -283,62 +391,45 @@ export function Settings({
               {uploadStatus === 'idle' || uploadStatus === 'error' ? (
                 <>
                   <div className="border-2 border-dashed border-primary/30 rounded-lg p-6 text-center">
-                    <FileText className="w-10 h-10 mx-auto mb-3 text-muted-foreground" />
-                    <p className="text-foreground mb-2">Upload WhatsApp or Telegram chat export</p>
-                    <p className="text-muted-foreground text-sm mb-4">Supports .txt or .zip files</p>
-                    <Label htmlFor="settings-file-upload">
+                    <MessageCircle className="w-10 h-10 mx-auto mb-3 text-muted-foreground" />
+                    <p className="text-foreground mb-2">Sync iMessage Conversations</p>
+                    <p className="text-muted-foreground text-sm mb-4">
+                      Connect to iMessage and sync your conversations. Messages are stored locally on your device for privacy.
+                    </p>
                       <Button
                         type="button"
-                        variant="outline"
-                        onClick={() => document.getElementById('settings-file-upload')?.click()}
+                      variant="default"
+                      onClick={async () => {
+                        try {
+                          setUploadStatus('uploading');
+                          setUploadProgress(50);
+                          // Connect to iMessage
+                          await apiClient.connectiMessage();
+                          // Sync conversations
+                          const syncResult = await apiClient.synciMessage(user.id);
+                          if (syncResult.success) {
+                            setUploadStatus('success');
+                            setUploadProgress(100);
+                            setTimeout(() => {
+                              setUploadProgress(0);
+                              setUploadStatus('idle');
+                            }, 2000);
+                          } else {
+                            setUploadStatus('error');
+                            setUploadError(syncResult.error || 'Failed to sync conversations');
+                          }
+                        } catch (error) {
+                          setUploadStatus('error');
+                          setUploadError('Failed to sync. Please check your iMessage connection.');
+                          console.error('Sync error:', error);
+                        }
+                      }}
                       >
-                        Choose File
+                      <MessageCircle className="w-4 h-4 mr-2" />
+                      Sync iMessage
                       </Button>
-                    </Label>
-                    <Input
-                      id="settings-file-upload"
-                      type="file"
-                      accept=".txt,.zip"
-                      onChange={handleFileSelect}
-                      className="hidden"
-                    />
                   </div>
 
-                  {uploadFile && (
-                    <>
-                      <div className="bg-primary/10 border border-primary/20 rounded-lg p-4">
-                        <p className="text-sm text-foreground font-medium mb-1">{uploadFile.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {(uploadFile.size / 1024).toFixed(2)} KB
-                        </p>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="settings-chat-name" className="text-sm">
-                          Your name in the chat
-                        </Label>
-                        <Input
-                          id="settings-chat-name"
-                          type="text"
-                          placeholder="e.g., Jules Mpano"
-                          value={chatDisplayName}
-                          onChange={(e) => setChatDisplayName(e.target.value)}
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          Enter your name exactly as it appears in the chat export
-                        </p>
-                      </div>
-
-                      <Button
-                        onClick={handleUpload}
-                        className="w-full"
-                        disabled={!chatDisplayName.trim()}
-                      >
-                        <Upload className="w-4 h-4 mr-2" />
-                        Upload and Process
-                      </Button>
-                    </>
-                  )}
                 </>
               ) : (
                 <div className="space-y-3">

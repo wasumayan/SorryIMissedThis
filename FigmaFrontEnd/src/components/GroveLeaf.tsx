@@ -106,8 +106,13 @@ export function GroveLeaf({
         initial="initial"
         animate="animate"
         whileHover="hover"
+        whileTap={{ scale: 0.95 }} // Visual feedback on click
         style={{ cursor: "pointer" }}
-        onClick={onClick}
+        onClick={(e) => {
+          e.stopPropagation(); // Prevent event bubbling
+          console.log('[LEAF] Dormant leaf clicked:', name);
+          onClick();
+        }}
       >
         <motion.g
           animate={swayAnimation}
@@ -215,8 +220,13 @@ export function GroveLeaf({
       initial="initial"
       animate={isBloomingFromBud ? "bloom" : "animate"}
       whileHover="hover"
+      whileTap={{ scale: 0.95 }} // Visual feedback on click
       style={{ cursor: "pointer" }}
-      onClick={onClick}
+      onClick={(e) => {
+        e.stopPropagation(); // Prevent event bubbling
+        console.log('[LEAF] Clicked:', name);
+        onClick();
+      }}
     >
       <motion.g
         animate={swayAnimation}

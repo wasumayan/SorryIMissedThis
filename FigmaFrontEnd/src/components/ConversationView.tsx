@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
@@ -8,84 +8,182 @@ import { Slider } from "./ui/slider";
 import { 
   ArrowLeft, 
   MessageCircle, 
-  ExternalLink, 
   Sparkles, 
   Info,
   Send,
-  CheckCircle
+  CheckCircle,
+  Loader2
 } from "lucide-react";
+import { apiClient } from "../services/api";
+import { localMessageStorage } from "../services/localStorage";
 
 interface Message {
   id: string;
   sender: "user" | "contact";
   text: string;
   timestamp: string;
-  platform: "whatsapp" | "telegram";
+  platform: "imessage";
 }
 
 interface ConversationViewProps {
   contactName: string;
+  contactId?: string;
+  conversationId?: string;
+  userId?: string;
   onBack: () => void;
 }
 
-const mockMessages: Message[] = [
-  {
-    id: "1",
-    sender: "contact",
-    text: "Hey! How are you doing?",
-    timestamp: "2 weeks ago",
-    platform: "whatsapp",
-  },
-  {
-    id: "2",
-    sender: "user",
-    text: "Hey! I'm good, just been super busy with work. How about you?",
-    timestamp: "2 weeks ago",
-    platform: "whatsapp",
-  },
-  {
-    id: "3",
-    sender: "contact",
-    text: "Same here! Actually, I have my big job interview next week. Pretty nervous about it.",
-    timestamp: "2 weeks ago",
-    platform: "whatsapp",
-  },
-  {
-    id: "4",
-    sender: "user",
-    text: "Oh wow, that's exciting! You'll do great. Which company is it?",
-    timestamp: "2 weeks ago",
-    platform: "whatsapp",
-  },
-  {
-    id: "5",
-    sender: "contact",
-    text: "It's with TechCorp! Dream job honestly. Fingers crossed 🤞",
-    timestamp: "2 weeks ago",
-    platform: "whatsapp",
-  },
-];
+interface Prompt {
+  id?: string;
+  text: string;
+  reason: string;
+  type?: string;
+  context?: string;
+  confidence?: number;
+}
 
-export function ConversationView({ contactName, onBack }: ConversationViewProps) {
+export function ConversationView({ contactName, contactId, conversationId, userId, onBack }: ConversationViewProps) {
   const [selectedPrompt, setSelectedPrompt] = useState(0);
   const [customPrompt, setCustomPrompt] = useState("");
   const [tone, setTone] = useState([50]); // 0-100 scale
   const [sent, setSent] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [prompts, setPrompts] = useState<Prompt[]>([]);
+  const [conversationSummary, setConversationSummary] = useState<string>("");
+  const [daysSinceContact, setDaysSinceContact] = useState<number>(0);
+  const [reciprocity, setReciprocity] = useState<number>(0.5);
+  const [isLoading, setIsLoading] = useState(true);
+  const [conversationData, setConversationData] = useState<any>(null);
 
-  const prompts = [
-    {
-      text: "Hey Sarah! I've been thinking about you – how did the TechCorp interview go? I hope it went well! 🤞",
-      reason: "Follow up on interview mentioned 2 weeks ago",
-    },
-    {
-      text: "Hi! Just wanted to check in – how have you been? Any updates on the job front?",
-      reason: "Gentle check-in with context",
-    },
-    {
-      text: "Hey! Hope you're doing well. Been meaning to catch up – free for a call this week?",
-      reason: "Suggest reconnection",
-    },
-  ];
+  // Fetch conversation data, messages, and prompts
+  useEffect(() => {
+    const fetchConversationData = async () => {
+      if (!conversationId && !contactId) {
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        setIsLoading(true);
+        const convId = conversationId || contactId;
+
+        // OPTIMIZATION: Fetch all data in parallel instead of sequentially
+        const [convResponse, promptsResponse, summaryResponse] = await Promise.allSettled([
+          apiClient.getConversation(convId || ''),
+          apiClient.getConversationPrompts(convId || ''),
+          apiClient.getConversationSummary(convId || '').catch(() => ({ success: false, data: null })) // Summary is optional
+        ]);
+
+        // Process conversation details
+        if (convResponse.status === 'fulfilled' && convResponse.value.success && convResponse.value.data) {
+          const conv = convResponse.value.data.conversation;
+          setConversationData(conv);
+          
+          // Extract metrics
+          const daysSince = conv.metrics?.days_since_contact || conv.daysSinceContact || 0;
+          const recip = conv.metrics?.reciprocity || conv.reciprocity || 0.5;
+          setDaysSinceContact(daysSince);
+          setReciprocity(recip);
+        }
+
+        // Fetch messages from local storage (synchronous, no need to await)
+        const localMessages = localMessageStorage.getMessages(convId || '');
+        const formattedMessages: Message[] = localMessages.map((msg) => ({
+          id: msg.message_id || `msg-${Math.random()}`,
+          sender: msg.sender === userId || msg.sender.toLowerCase() === 'user' ? 'user' : 'contact',
+          text: msg.content,
+          timestamp: formatTimestamp(msg.timestamp),
+          platform: 'imessage'
+        }));
+        setMessages(formattedMessages);
+
+        // Process prompts
+        if (promptsResponse.status === 'fulfilled' && promptsResponse.value.success && promptsResponse.value.data) {
+          const apiPrompts: Prompt[] = promptsResponse.value.data.prompts.map((p: any) => ({
+            id: p.prompt_id,
+            text: p.text,
+            reason: p.context || p.type || 'AI-generated prompt',
+            type: p.type,
+            context: p.context,
+            confidence: p.confidence
+          }));
+          
+          if (apiPrompts.length > 0) {
+            setPrompts(apiPrompts);
+            setCustomPrompt(apiPrompts[0].text);
+          } else {
+            // Generate new prompts if none exist
+            await generateNewPrompts(convId || '');
+          }
+        } else {
+          // Generate new prompts if fetch failed
+          await generateNewPrompts(convId || '');
+        }
+
+        // Process summary (optional)
+        if (summaryResponse.status === 'fulfilled' && summaryResponse.value.success && summaryResponse.value.data) {
+          setConversationSummary(summaryResponse.value.data.summary || '');
+        }
+
+      } catch (error) {
+        console.error('Error fetching conversation data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchConversationData();
+  }, [conversationId, contactId, userId]);
+
+  const generateNewPrompts = async (convId: string) => {
+    try {
+      const response = await apiClient.generateNewPrompts(convId, { num_prompts: 3 });
+      if (response.success && response.data) {
+        const newPrompts: Prompt[] = response.data.prompts.map((p: any) => ({
+          id: p.prompt_id,
+          text: p.text,
+          reason: p.context || p.type || 'AI-generated prompt',
+          type: p.type,
+          context: p.context,
+          confidence: p.confidence
+        }));
+        setPrompts(newPrompts);
+        if (newPrompts.length > 0) {
+          setCustomPrompt(newPrompts[0].text);
+        }
+      }
+    } catch (error) {
+      console.error('Error generating prompts:', error);
+    }
+  };
+
+  const formatTimestamp = (timestamp: string): string => {
+    try {
+      const date = new Date(timestamp);
+      const now = new Date();
+      const diffMs = now.getTime() - date.getTime();
+      const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+      
+      if (diffDays === 0) return 'Today';
+      if (diffDays === 1) return 'Yesterday';
+      if (diffDays < 7) return `${diffDays} days ago`;
+      if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`;
+      if (diffDays < 365) return `${Math.floor(diffDays / 30)} months ago`;
+      return `${Math.floor(diffDays / 365)} years ago`;
+    } catch {
+      return timestamp;
+    }
+  };
+
+  const formatDaysAgo = (days: number): string => {
+    if (days === 0) return 'today';
+    if (days === 1) return 'yesterday';
+    if (days < 7) return `${days} days ago`;
+    if (days < 30) return `${Math.floor(days / 7)} weeks ago`;
+    if (days < 365) return `${Math.floor(days / 30)} months ago`;
+    return `${Math.floor(days / 365)} years ago`;
+  };
 
   const getToneName = (value: number) => {
     if (value < 33) return "Formal";
@@ -93,11 +191,53 @@ export function ConversationView({ contactName, onBack }: ConversationViewProps)
     return "Playful";
   };
 
-  const handleOpenInPlatform = () => {
+  const handleSendMessage = async () => {
+    if (!conversationId && !contactId) {
+      alert('Cannot send message: conversation ID not available');
+      return;
+    }
+    
+    if (prompts.length === 0) {
+      alert('No prompts available. Please generate prompts first.');
+      return;
+    }
+    
+    const originalPrompt = prompts[selectedPrompt];
+    const messageToSend = customPrompt || originalPrompt.text;
+    if (!messageToSend.trim()) {
+      alert('Please enter a message');
+      return;
+    }
+    
+    // Determine if message was edited
+    const wasEdited = customPrompt.trim() !== '' && customPrompt.trim() !== originalPrompt.text.trim();
+    
+    setSending(true);
+    try {
+      const { apiClient } = await import('../services/api');
+      const result = await apiClient.sendiMessage(
+        conversationId || contactId || '',
+        messageToSend,
+        userId, // userId
+        originalPrompt.id || originalPrompt.prompt_id || undefined, // promptId (may be undefined)
+        originalPrompt.text, // originalPromptText
+        wasEdited // wasEdited
+      );
+      
+      if (result.success) {
     setSent(true);
     setTimeout(() => {
       onBack();
     }, 2000);
+      } else {
+        alert('Failed to send message: ' + (result.error || 'Unknown error'));
+        setSending(false);
+      }
+    } catch (error) {
+      console.error('Error sending message:', error);
+      alert('Error sending message. Please try again.');
+      setSending(false);
+    }
   };
 
   return (
@@ -111,11 +251,11 @@ export function ConversationView({ contactName, onBack }: ConversationViewProps)
           <h2>{contactName}</h2>
           <div className="flex items-center gap-2 mt-1">
             <Badge variant="outline" className="text-xs">
-              Last contact: 2 weeks ago
+              Last contact: {formatDaysAgo(daysSinceContact)}
             </Badge>
             <Badge variant="outline" className="text-xs flex items-center gap-1">
               <MessageCircle className="w-3 h-3" />
-              WhatsApp
+              iMessage
             </Badge>
           </div>
         </div>
@@ -125,6 +265,7 @@ export function ConversationView({ contactName, onBack }: ConversationViewProps)
         {/* Left: Conversation Thread */}
         <div className="flex-1 flex flex-col border-r">
           {/* AI Summary */}
+          {conversationSummary && (
           <div className="bg-gradient-to-r from-primary/10 via-accent/10 to-secondary/20 border-b p-4">
             <div className="flex items-start gap-3">
               <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-primary/50 flex items-center justify-center shrink-0">
@@ -133,30 +274,46 @@ export function ConversationView({ contactName, onBack }: ConversationViewProps)
               <div className="flex-1">
                 <h4 className="mb-2">Conversation Summary</h4>
                 <p className="text-muted-foreground" style={{ fontSize: '0.875rem' }}>
-                  Last spoke <strong>2 weeks ago</strong>. Sarah mentioned she had an important{" "}
-                  <strong>job interview at TechCorp</strong>. She seemed nervous but excited about it.
-                  This would be a good time to follow up and show support.
+                    {conversationSummary}
                 </p>
                 <div className="flex items-center gap-4 mt-3">
                   <div className="flex items-center gap-2">
                     <div className="text-xs text-muted-foreground">Reciprocity:</div>
                     <div className="flex gap-0.5">
-                      <div className="w-2 h-4 bg-gradient-to-t from-primary to-primary/70 rounded-sm" />
-                      <div className="w-2 h-4 bg-gradient-to-t from-primary to-primary/70 rounded-sm" />
-                      <div className="w-2 h-4 bg-gradient-to-t from-primary to-primary/70 rounded-sm" />
-                      <div className="w-2 h-4 bg-muted rounded-sm" />
-                      <div className="w-2 h-4 bg-muted rounded-sm" />
+                        {[1, 2, 3, 4, 5].map((i) => (
+                          <div
+                            key={i}
+                            className={`w-2 h-4 rounded-sm ${
+                              i <= Math.round(reciprocity * 5)
+                                ? 'bg-gradient-to-t from-primary to-primary/70'
+                                : 'bg-muted'
+                            }`}
+                          />
+                        ))}
+                      </div>
+                      <span className="text-xs text-muted-foreground ml-1">
+                        {Math.round(reciprocity * 100)}%
+                      </span>
                     </div>
                   </div>
                 </div>
               </div>
             </div>
-          </div>
+          )}
 
           {/* Messages */}
           <ScrollArea className="flex-1 p-6">
             <div className="space-y-4 max-w-3xl">
-              {mockMessages.map((message) => (
+              {isLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : messages.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <p>No messages yet. Start the conversation!</p>
+                </div>
+              ) : (
+                messages.map((message) => (
                 <div
                   key={message.id}
                   className={`flex ${message.sender === "user" ? "justify-end" : "justify-start"}`}
@@ -179,7 +336,8 @@ export function ConversationView({ contactName, onBack }: ConversationViewProps)
                     </p>
                   </div>
                 </div>
-              ))}
+                ))
+              )}
             </div>
           </ScrollArea>
         </div>
@@ -197,8 +355,29 @@ export function ConversationView({ contactName, onBack }: ConversationViewProps)
             <div className="space-y-6">
               {/* Suggested Prompts */}
               <div className="space-y-3">
+                <div className="flex items-center justify-between">
                 <label>Suggested Prompts</label>
-                {prompts.map((prompt, index) => (
+                  {prompts.length === 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => generateNewPrompts(conversationId || contactId || '')}
+                      className="text-xs"
+                    >
+                      Generate
+                    </Button>
+                  )}
+                </div>
+                {isLoading && prompts.length === 0 ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : prompts.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground text-sm">
+                    <p>No prompts available. Click "Generate" to create AI prompts.</p>
+                  </div>
+                ) : (
+                  prompts.map((prompt, index) => (
                   <Card
                     key={index}
                     className={`p-4 cursor-pointer transition-all border-2 ${
@@ -217,19 +396,32 @@ export function ConversationView({ contactName, onBack }: ConversationViewProps)
                       <span style={{ fontSize: '0.75rem' }}>{prompt.reason}</span>
                     </div>
                   </Card>
-                ))}
+                  ))
+                )}
               </div>
 
               {/* Custom Edit */}
               <div className="space-y-2">
+                <div className="flex items-center justify-between">
                 <label>Edit Your Message</label>
+                  {customPrompt && customPrompt.trim() !== prompts[selectedPrompt].text.trim() && (
+                    <Badge variant="outline" className="text-xs">
+                      Edited
+                    </Badge>
+                  )}
+                </div>
                 <Textarea
                   value={customPrompt || prompts[selectedPrompt].text}
                   onChange={(e) => setCustomPrompt(e.target.value)}
                   rows={4}
-                  placeholder="Customize your message..."
+                  placeholder="Click a prompt above, then edit it here to customize your message..."
                   className="resize-none"
                 />
+                <p className="text-xs text-muted-foreground">
+                  {customPrompt && customPrompt.trim() !== prompts[selectedPrompt].text.trim()
+                    ? "✓ Your message has been customized"
+                    : "You can edit the selected prompt above to personalize it"}
+                </p>
               </div>
 
               {/* Tone Dial */}
@@ -252,6 +444,7 @@ export function ConversationView({ contactName, onBack }: ConversationViewProps)
               </div>
 
               {/* Why this prompt? */}
+              {prompts.length > 0 && prompts[selectedPrompt] && (
               <Card className="p-4 bg-gradient-to-br from-accent/20 to-secondary/30 border-2 border-primary/20">
                 <div className="flex items-start gap-3">
                   <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center shrink-0">
@@ -260,22 +453,33 @@ export function ConversationView({ contactName, onBack }: ConversationViewProps)
                   <div>
                     <h4 className="mb-2">Why this prompt?</h4>
                     <div className="space-y-2 text-muted-foreground" style={{ fontSize: '0.875rem' }}>
+                        {daysSinceContact > 0 && (
                       <div className="flex items-center gap-2">
-                        <Badge className="text-xs bg-primary/20 text-primary border-primary/30">2 weeks</Badge>
-                        <span>since last reply</span>
+                            <Badge className="text-xs bg-primary/20 text-primary border-primary/30">
+                              {formatDaysAgo(daysSinceContact)}
+                            </Badge>
+                            <span>since last contact</span>
                       </div>
+                        )}
+                        {prompts[selectedPrompt].context && (
                       <div className="flex items-center gap-2">
                         <Badge className="text-xs bg-accent/30 text-foreground border-accent/50">Context</Badge>
-                        <span>Interview mentioned in conversation</span>
+                            <span>{prompts[selectedPrompt].context}</span>
                       </div>
+                        )}
+                        {prompts[selectedPrompt].type && (
                       <div className="flex items-center gap-2">
-                        <Badge className="text-xs bg-secondary text-foreground border-secondary">Timing</Badge>
-                        <span>Natural follow-up window</span>
+                            <Badge className="text-xs bg-secondary text-foreground border-secondary">
+                              {prompts[selectedPrompt].type}
+                            </Badge>
+                            <span>AI-generated suggestion</span>
                       </div>
+                        )}
                     </div>
                   </div>
                 </div>
               </Card>
+              )}
             </div>
           </ScrollArea>
 
@@ -284,16 +488,23 @@ export function ConversationView({ contactName, onBack }: ConversationViewProps)
             {sent ? (
               <div className="flex items-center justify-center gap-2 py-3 text-primary">
                 <CheckCircle className="w-5 h-5" />
-                <span>Message ready in WhatsApp!</span>
+                <span>Message sent via iMessage!</span>
               </div>
             ) : (
               <>
-                <Button onClick={handleOpenInPlatform} className="w-full gap-2" size="lg">
-                  <ExternalLink className="w-4 h-4" />
-                  Open in WhatsApp
+                <Button 
+                  onClick={handleSendMessage} 
+                  className="w-full gap-2" 
+                  size="lg"
+                  disabled={sending || !conversationId && !contactId}
+                >
+                  <Send className="w-4 h-4" />
+                  {sending ? 'Sending...' : 'Send via iMessage'}
                 </Button>
                 <p className="text-center text-muted-foreground" style={{ fontSize: '0.75rem' }}>
-                  Your message will be pre-filled in WhatsApp
+                  {conversationId || contactId 
+                    ? 'Your message will be sent directly via iMessage'
+                    : 'Conversation ID not available. Please sync conversations first.'}
                 </p>
               </>
             )}

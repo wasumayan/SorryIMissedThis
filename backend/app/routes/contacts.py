@@ -5,7 +5,8 @@ Handles CRUD operations for user contacts
 
 from flask import Blueprint, request, jsonify
 from app.services.azure_storage import storage
-from datetime import datetime
+from app.utils.helpers import get_user_id, get_partner_name
+from datetime import datetime, timedelta
 import uuid
 
 contacts_bp = Blueprint('contacts', __name__)
@@ -30,7 +31,7 @@ def get_contacts():
         return jsonify({}), 200
 
     try:
-        user_id = request.args.get('userId')
+        user_id = request.args.get('userId') or request.args.get('user_id')  # Support both formats
         print(f"[CONTACTS] Getting contacts for userId: {user_id}")
 
         if not user_id:
@@ -50,7 +51,9 @@ def get_contacts():
 
         # Debug: Print first conversation if available
         if conversations:
-            print(f"[CONTACTS] Sample conversation: {conversations[0].get('partnerName', 'Unknown')}, status: {conversations[0].get('status', 'N/A')}")
+            from app.utils.helpers import get_partner_name
+            partner_name = get_partner_name(conversations[0]) if conversations else 'Unknown'
+            print(f"[CONTACTS] Sample conversation: {partner_name}, status: {conversations[0].get('status', 'N/A') if conversations else 'N/A'}")
 
         # Apply filters
         category = request.args.get('category')
@@ -62,16 +65,75 @@ def get_contacts():
             # Get last message time
             last_message_at = conv.get('lastMessageAt')
 
+            # Calculate frequency for past 50 days (avg messages per day)
+            # Get messages from conversation and filter by last 50 days
+            messages = conv.get('messages', [])
+            fifty_days_ago = datetime.utcnow() - timedelta(days=50)
+            
+            # Count messages in past 50 days
+            messages_past_50_days = 0
+            if messages:
+                for msg in messages:
+                    msg_time = msg.get('timestamp') if isinstance(msg, dict) else getattr(msg, 'timestamp', None)
+                    if msg_time:
+                        if isinstance(msg_time, str):
+                            msg_time = datetime.fromisoformat(msg_time.replace('Z', '+00:00'))
+                        if msg_time >= fifty_days_ago:
+                            messages_past_50_days += 1
+            
+            # Frequency is messages per day over past 50 days
+            frequency_past_50_days = messages_past_50_days / 50.0 if messages_past_50_days > 0 else 0
+            
+            # Get conversation-specific tone (with category-based defaults)
+            conversation_tone = conv.get('tone')
+            if not conversation_tone:
+                category = conv.get('category', 'friends')
+                category_tone_map = {
+                    'work': 'formal',
+                    'family': 'friendly',
+                    'friends': 'friendly'
+                }
+                conversation_tone = category_tone_map.get(category, 'friendly')
+            
+            # Calculate normalized scores for graph visualization
+            days_since_contact = conv.get('daysSinceContact', 0)
+            
+            # Recency: normalized 0-1 (0 = just contacted, 1 = very old)
+            # Normalize: 0 days = 0, 90+ days = 1
+            recency_normalized = min(1.0, days_since_contact / 90.0)
+            
+            # Frequency: normalized 0-1 (0 = no messages, 1 = very frequent)
+            # Normalize: 0 msg/day = 0, 5+ msg/day = 1
+            frequency_normalized = min(1.0, frequency_past_50_days / 5.0)
+            
+            # Relationship health: combination of frequency and recency
+            # High frequency + recent = healthy
+            # Low frequency + old = dormant/wilted
+            # Medium = attention
+            if frequency_normalized > 0.5 and recency_normalized < 0.3:
+                relationship_health = 'healthy'
+            elif frequency_normalized < 0.2 and recency_normalized > 0.7:
+                relationship_health = 'wilted'
+            elif recency_normalized > 0.5:
+                relationship_health = 'dormant'
+            elif frequency_normalized < 0.3:
+                relationship_health = 'attention'
+            else:
+                relationship_health = 'healthy'
+            
             # Create contact object from conversation
             contact = {
                 'id': conv.get('id'),
-                'name': conv.get('partnerName', 'Unknown'),
+                'name': get_partner_name(conv) or 'Unknown',
                 'category': conv.get('category', 'friends'),
-                'status': conv.get('status', 'healthy'),
+                'tone': conversation_tone,  # Conversation-specific tone
+                'status': relationship_health,  # Calculated from frequency + recency
                 'size': min(1.0, conv.get('messageCount', 0) / 100),  # Normalize (0-1)
                 'closeness': conv.get('reciprocity', 0.5),  # Reciprocity as closeness (0-1)
-                'recency': max(0, min(1.0, 1.0 - (conv.get('daysSinceContact', 0) / 90))),  # More recent = higher (0-1)
-                'lastContact': f"{conv.get('daysSinceContact', 0)} days ago",  # Human readable
+                'recency': recency_normalized,  # Normalized recency (0-1, where 0 = recent, 1 = old)
+                'frequency': frequency_normalized,  # Normalized frequency (0-1, where 0 = low, 1 = high)
+                'daysSinceContact': days_since_contact,  # Raw days since contact
+                'lastContact': f"{days_since_contact} days ago",  # Human readable
                 'phoneNumber': conv.get('phoneNumber'),
                 'email': conv.get('email'),
                 'platforms': conv.get('platforms', []),
@@ -80,7 +142,7 @@ def get_contacts():
                     'lastContact': last_message_at,  # ISO timestamp
                     'averageResponseTime': conv.get('avgResponseTime', 0),
                     'reciprocity': conv.get('reciprocity', 0),
-                    'interactionFrequency': conv.get('interactionFrequency', 0)
+                    'interactionFrequency': frequency_past_50_days  # Messages per day in past 50 days
                 },
                 'position': conv.get('position'),
                 'tags': conv.get('tags', []),
@@ -125,7 +187,7 @@ def get_contact(contact_id):
     try:
         # Get conversation (contact) by ID
         # We need user_id from query or auth token
-        user_id = request.args.get('userId')
+        user_id = request.args.get('userId') or request.args.get('user_id')  # Support both formats
 
         if not user_id:
             return jsonify({'error': 'userId parameter is required'}), 400
@@ -138,7 +200,7 @@ def get_contact(contact_id):
         # Format as contact
         contact = {
             'id': conversation.get('id'),
-            'name': conversation.get('partnerName', 'Unknown'),
+            'name': get_partner_name(conversation) or 'Unknown',
             'category': conversation.get('category', 'friends'),
             'status': conversation.get('status', 'healthy'),
             'size': min(1.0, conversation.get('messageCount', 0) / 100),
@@ -204,7 +266,8 @@ def create_contact():
         if not data:
             return jsonify({'error': 'No data provided'}), 400
 
-        user_id = data.get('userId')
+        from app.utils.helpers import get_user_id, get_partner_name
+        user_id = get_user_id(data)
         name = data.get('name')
         category = data.get('category', 'friends')
 
@@ -272,7 +335,8 @@ def update_contact(contact_id):
         if not data:
             return jsonify({'error': 'No data provided'}), 400
 
-        user_id = data.get('userId')
+        from app.utils.helpers import get_user_id, get_partner_name
+        user_id = get_user_id(data)
 
         if not user_id:
             return jsonify({'error': 'userId is required'}), 400
@@ -314,13 +378,82 @@ def update_contact(contact_id):
         return jsonify({'error': 'Internal server error', 'message': str(e)}), 500
 
 
+@contacts_bp.route('/<contact_id>/update-metrics', methods=['POST'])
+def update_contact_metrics(contact_id):
+    """
+    Update contact metrics
+    
+    Expected JSON body:
+    {
+        "messageCount": 100,
+        "responseTime": 2.5
+    }
+    """
+    try:
+        data = request.get_json()
+        user_id = request.args.get('userId') or request.args.get('user_id')
+        
+        if not user_id:
+            return jsonify({'error': 'userId parameter is required'}), 400
+        
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        # Get existing conversation
+        conversation = storage.get_conversation(contact_id, user_id)
+        
+        if not conversation:
+            return jsonify({'error': 'Contact not found'}), 404
+        
+        # Update metrics
+        updates = {}
+        if 'messageCount' in data:
+            updates['messageCount'] = data['messageCount']
+        if 'responseTime' in data:
+            updates['avgResponseTime'] = data['responseTime']
+        
+        if updates:
+            updates['updatedAt'] = datetime.utcnow().isoformat()
+            success = storage.update_conversation(contact_id, user_id, updates)
+            
+            if not success:
+                return jsonify({'error': 'Failed to update contact metrics'}), 500
+        
+        # Get updated contact
+        updated = storage.get_conversation(contact_id, user_id)
+        contact = {
+            'id': updated.get('id'),
+            'name': get_partner_name(updated) or 'Unknown',
+            'category': updated.get('category', 'friends'),
+            'status': updated.get('status', 'healthy'),
+            'metrics': {
+                'totalMessages': updated.get('messageCount', 0),
+                'averageResponseTime': updated.get('avgResponseTime', 0),
+                'reciprocity': updated.get('reciprocity', 0),
+                'interactionFrequency': updated.get('interactionFrequency', 0)
+            }
+        }
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'contact': contact
+            },
+            'message': 'Contact metrics updated successfully'
+        }), 200
+    
+    except Exception as e:
+        print(f"Error updating contact metrics: {str(e)}")
+        return jsonify({'error': 'Internal server error', 'message': str(e)}), 500
+
+
 @contacts_bp.route('/<contact_id>', methods=['DELETE'])
 def delete_contact(contact_id):
     """
     Delete a contact
     """
     try:
-        user_id = request.args.get('userId')
+        user_id = request.args.get('userId') or request.args.get('user_id')  # Support both formats
 
         if not user_id:
             return jsonify({'error': 'userId parameter is required'}), 400
@@ -354,7 +487,7 @@ def get_contact_stats():
         - userId: User ID (required)
     """
     try:
-        user_id = request.args.get('userId')
+        user_id = request.args.get('userId') or request.args.get('user_id')  # Support both formats
 
         if not user_id:
             return jsonify({'error': 'userId parameter is required'}), 400

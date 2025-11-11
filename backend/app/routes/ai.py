@@ -6,6 +6,7 @@ from flask import Blueprint, request, jsonify, current_app
 from datetime import datetime
 from app.services.azure_storage import storage
 from app.services.ai_service import AIService
+from app.utils.helpers import get_user_id, get_conversation_id, get_partner_name
 
 ai_bp = Blueprint('ai', __name__)
 ai_service = AIService()
@@ -31,8 +32,8 @@ def analyze_conversation():
         if not data:
             return jsonify({'error': 'No data provided'}), 400
 
-        conversation_id = data.get('conversationId')
-        user_id = data.get('userId')
+        conversation_id = get_conversation_id(data)
+        user_id = get_user_id(data)
 
         if not conversation_id or not user_id:
             return jsonify({'error': 'conversationId and userId are required'}), 400
@@ -51,7 +52,7 @@ def analyze_conversation():
             # Generate analysis using AI service
             # For now, return structured placeholder data
             ai_analysis = {
-                'summary': f"Regular conversation with {conversation.get('partnerName', 'contact')} covering various topics",
+                'summary': f"Regular conversation with {get_partner_name(conversation) or 'contact'} covering various topics",
                 'sentiment': {
                     'overall': 'positive',
                     'userSentiment': 'positive',
@@ -129,7 +130,7 @@ def generate_prompts():
             return jsonify({'error': 'No data provided'}), 400
 
         contact_id = data.get('contactId')
-        user_id = data.get('userId')
+        user_id = get_user_id(data)
         context = data.get('context', '')
         tone = data.get('tone', 'friendly')
 
@@ -143,7 +144,8 @@ def generate_prompts():
             return jsonify({'error': 'Contact not found'}), 404
 
         # Generate prompts based on conversation history
-        partner_name = conversation.get('partnerName', 'your contact')
+        from app.utils.helpers import get_partner_name
+        partner_name = get_partner_name(conversation) or 'your contact'
         days_since = conversation.get('daysSinceContact', 0)
 
         prompts = []
@@ -225,7 +227,7 @@ def analyze_relationship():
             return jsonify({'error': 'No data provided'}), 400
 
         contact_id = data.get('contactId')
-        user_id = data.get('userId')
+        user_id = get_user_id(data)
 
         if not contact_id or not user_id:
             return jsonify({'error': 'contactId and userId are required'}), 400
@@ -343,7 +345,7 @@ def get_daily_suggestions():
         List of daily suggestions prioritized by importance
     """
     try:
-        user_id = request.args.get('userId')
+        user_id = request.args.get('userId') or request.args.get('user_id')  # Support both formats
         limit = int(request.args.get('limit', 5))
 
         if not user_id:
@@ -367,31 +369,59 @@ def get_daily_suggestions():
             # Prioritize based on days since contact and status
             priority = 'low'
             suggestion_text = ''
+            suggestion_reason = ''
 
-            if days_since > 30:
-                priority = 'high'
-                suggestion_text = f"It's been over a month - reconnect with {conv.get('partnerName', 'contact')}"
-            elif days_since > 14:
-                priority = 'high' if status in ['dormant', 'wilted'] else 'medium'
-                suggestion_text = f"Check in with {conv.get('partnerName', 'contact')}"
-            elif days_since > 7:
-                priority = 'medium'
-                suggestion_text = f"Catch up with {conv.get('partnerName', 'contact')}"
-            elif reciprocity < 0.3:
-                priority = 'medium'
-                suggestion_text = f"Initiate a conversation with {conv.get('partnerName', 'contact')}"
+            partner_name = get_partner_name(conv) or 'contact'
+            conversation_id = conv.get('id')
+            
+            # CONTEXT-AWARE: Get existing prompts or skip (let user generate via conversation view)
+            # For daily suggestions, we'll use existing prompts if available, otherwise skip
+            # This avoids expensive AI calls on every daily suggestions request
+            try:
+                existing_prompts = storage.get_conversation_prompts(conversation_id, unused_only=True)
+                
+                if existing_prompts and len(existing_prompts) > 0:
+                    # Use existing prompt
+                    prompt = existing_prompts[0]
+                    suggestion_text = prompt.prompt_text
+                    suggestion_reason = prompt.context or f'Last contact was {days_since} days ago'
+                    priority = 'high' if days_since > 14 else ('medium' if days_since > 7 else 'low')
+                else:
+                    # No existing prompts - only suggest if it's been a while
+                    # User can generate context-aware prompts when they click on the contact
+                    if days_since > 7:
+                        priority = 'high' if days_since > 14 else 'medium'
+                        suggestion_text = f"Check in with {partner_name}"
+                        suggestion_reason = f'Last contact was {days_since} days ago - click to generate personalized prompts'
+                    elif reciprocity < 0.3:
+                        priority = 'medium'
+                        suggestion_text = f"Reach out to {partner_name}"
+                        suggestion_reason = 'Low reciprocity - click to generate personalized prompts'
+                    else:
+                        # Skip - not urgent enough
+                        continue
+                    
+            except Exception as e:
+                current_app.logger.warning(f"Error getting prompts for {conversation_id}: {str(e)}")
+                # Fallback to simple prompt only if urgent
+                if days_since > 14:
+                    priority = 'high' if status in ['dormant', 'wilted'] else 'medium'
+                    suggestion_text = f"Check in with {partner_name}"
+                    suggestion_reason = f'Last contact was {days_since} days ago'
+                else:
+                    continue
 
             if suggestion_text:
                 suggestions.append({
                     'contact': {
-                        'id': conv.get('id'),
-                        'name': conv.get('partnerName', 'Unknown'),
+                        'id': conversation_id,
+                        'name': partner_name,
                         'status': status
                     },
                     'priority': priority,
                     'suggestion': {
                         'text': suggestion_text,
-                        'reason': f'Last contact was {days_since} days ago'
+                        'reason': suggestion_reason or f'Last contact was {days_since} days ago'
                     },
                     'lastContact': conv.get('lastMessageAt')
                 })

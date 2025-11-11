@@ -86,6 +86,11 @@ def register():
                 'ai': {
                     'promptStyle': 'friendly',
                     'autoAnalysis': True
+                },
+                'chatTracking': {
+                    'mode': 'all',  # 'all', 'recent', 'selected'
+                    'maxChats': 50,  # For 'recent' mode
+                    'selectedChatIds': []  # For 'selected' mode
                 }
             },
             'connectedPlatforms': {

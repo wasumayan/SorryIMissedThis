@@ -31,7 +31,11 @@ class ApiClient {
     endpoint: string,
     options: RequestInit = {}
   ): Promise<ApiResponse<T>> {
+    const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const startTime = Date.now();
     const url = `${this.baseURL}${endpoint}`;
+    const method = options.method || 'GET';
+    console.log(`[DEBUG] [${requestId}] API ${method} ${url}`);
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -40,23 +44,54 @@ class ApiClient {
 
     if (this.token) {
       headers['Authorization'] = `Bearer ${this.token}`;
+      console.log(`[DEBUG] [${requestId}] Token present (length: ${this.token.length})`);
+    } else {
+      console.warn(`[WARN] [${requestId}] No token present`);
     }
 
     try {
+      console.log(`[DEBUG] [${requestId}] Sending ${method} request...`);
       const response = await fetch(url, {
         ...options,
         headers,
       });
 
+      const elapsed = Date.now() - startTime;
+      console.log(`[DEBUG] [${requestId}] Response received: status=${response.status} (took ${elapsed}ms)`);
       const data = await response.json();
+      console.log(`[DEBUG] [${requestId}] Response data:`, { 
+        success: data.success, 
+        hasData: !!data.data, 
+        error: data.error,
+        dataType: data.data ? (Array.isArray(data.data) ? `array[${data.data.length}]` : typeof data.data) : 'null'
+      });
 
       if (!response.ok) {
-        throw new Error(data.error || 'Request failed');
+        const totalTime = Date.now() - startTime;
+        console.error(`[ERROR] [${requestId}] ❌ Request failed after ${totalTime}ms:`, { 
+          status: response.status, 
+          statusText: response.statusText,
+          error: data.error || data.message,
+          endpoint: endpoint
+        });
+        // Return error response with proper structure instead of throwing
+        return {
+          success: false,
+          error: data.error || data.message || 'Request failed',
+          data: null
+        } as ApiResponse<T>;
       }
 
+      const totalTime = Date.now() - startTime;
+      console.log(`[DEBUG] [${requestId}] ✅ Request successful (total time: ${totalTime}ms)`);
       return data;
     } catch (error) {
-      console.error('API request failed:', error);
+      const totalTime = Date.now() - startTime;
+      console.error(`[ERROR] [${requestId}] ❌ Exception occurred after ${totalTime}ms:`, error);
+      console.error(`[ERROR] [${requestId}] Error details:`, error instanceof Error ? {
+        message: error.message,
+        stack: error.stack?.split('\n').slice(0, 3).join('\n')
+      } : String(error));
       throw error;
     }
   }
@@ -145,6 +180,13 @@ class ApiClient {
     });
   }
 
+  async updateConversationTone(conversationId: string, tone: 'formal' | 'friendly' | 'playful') {
+    return this.request<{ success: boolean; conversation_id: string; tone: string }>(`/conversations/${conversationId}/tone`, {
+      method: 'PUT',
+      body: JSON.stringify({ tone }),
+    });
+  }
+
   async deleteContact(id: string) {
     return this.request(`/contacts/${id}`, { method: 'DELETE' });
   }
@@ -192,6 +234,45 @@ class ApiClient {
 
   async getConversationSummary(id: string) {
     return this.request<{ summary: ConversationSummary }>(`/conversations/${id}/summary`);
+  }
+
+  async getConversationPrompts(conversationId: string, unusedOnly: boolean = true) {
+    return this.request<{
+      conversation_id: string;
+      total: number;
+      prompts: Array<{
+        prompt_id: string;
+        text: string;
+        type: string;
+        context: string;
+        tone: string;
+        confidence: number;
+        used: boolean;
+        created_at: string;
+      }>;
+    }>(`/conversations/${conversationId}/prompts?unused_only=${unusedOnly}`);
+  }
+
+  async generateNewPrompts(conversationId: string, options?: {
+    num_prompts?: number;
+    tone?: string;
+  }) {
+    return this.request<{
+      prompts: Array<{
+        prompt_id: string;
+        text: string;
+        type: string;
+        context: string;
+        tone: string;
+        confidence: number;
+      }>;
+    }>(`/conversations/${conversationId}/prompts`, {
+      method: 'POST',
+      body: JSON.stringify({
+        num_prompts: options?.num_prompts || 3,
+        tone: options?.tone
+      }),
+    });
   }
 
   // AI Features
@@ -303,6 +384,210 @@ class ApiClient {
 
     return response.json();
   }
+
+  // iMessage Integration
+  async connectiMessage(userName?: string) {
+    const response = await this.request<{
+      success: boolean;
+      message: string;
+      data: {
+        user: User;
+        token: string;
+        refreshToken: string;
+        user_identity: {
+          imessage_account?: string;
+          icloud_account?: string;
+          icloud_name?: string;
+        };
+      };
+    }>('/imessage/connect', {
+      method: 'POST',
+      body: JSON.stringify({ userName }),
+    });
+    
+    if (response.success && response.data?.token) {
+      this.setToken(response.data.token);
+    }
+    
+    return response;
+  }
+
+  async synciMessage(userId: string) {
+    return this.request<{
+      success: boolean;
+      message: string;
+      data: {
+        conversations_synced: number;
+        conversation_ids: string[];
+      };
+    }>('/imessage/sync', {
+      method: 'POST',
+      body: JSON.stringify({ userId }),
+    });
+  }
+
+  async getiMessageStatus() {
+    return this.request<{
+      success: boolean;
+      data: {
+        enabled: boolean;
+        connected: boolean;
+        server_url: string | null;
+      };
+    }>('/imessage/status');
+  }
+
+  async getAvailableChats(limit: number = 200) {
+    return this.request<{
+      success: boolean;
+      data: {
+        chats: Array<{
+          guid: string;
+          displayName: string;
+          participants: any[];
+          isGroup: boolean;
+          lastMessageDate?: number;
+        }>;
+        total: number;
+      };
+    }>(`/imessage/chats?limit=${limit}`);
+  }
+
+  // DEPRECATED: Use the method below instead (updateChatTrackingPreferences with chatTracking object)
+  // This method is kept for backward compatibility but should not be used
+  async updateChatTrackingPreferences_OLD(
+    userId: string,
+    mode: 'all' | 'recent' | 'selected',
+    maxChats?: number,
+    selectedChatGuids?: string[]
+  ) {
+    return this.request<{
+      success: boolean;
+      message: string;
+      data: {
+        preferences: {
+          mode: string;
+          maxChats: number;
+          selectedChatGuids: string[];
+        };
+      };
+    }>('/imessage/preferences/chat-tracking', {
+      method: 'POST',
+      body: JSON.stringify({
+        userId,
+        mode,
+        maxChats,
+        selectedChatGuids
+      }),
+    });
+  }
+
+  async sendiMessage(
+    conversationId: string, 
+    message?: string, 
+    userId?: string,
+    promptId?: string,
+    originalPromptText?: string,
+    wasEdited?: boolean,
+    content?: {
+      text?: string;
+      images?: string[];
+      files?: string[];
+    }
+  ) {
+    const payload: any = {
+      conversationId,
+      userId,
+      promptId,
+      originalPromptText,
+      wasEdited
+    };
+
+    // Support both legacy string format and new content object format
+    if (content) {
+      payload.content = content;
+    } else if (message) {
+      payload.message = message;
+    } else {
+      throw new Error('Either message or content must be provided');
+    }
+
+    return this.request<{
+      success: boolean;
+      message: string;
+      data: any;
+    }>('/imessage/send', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getPromptUsageStats(userId?: string) {
+    const url = userId 
+      ? `/analytics/prompt-usage?userId=${userId}`
+      : '/analytics/prompt-usage';
+    return this.request<{
+      success: boolean;
+      data: {
+        prompt_usage: {
+          total_sent: number;
+          total_edited: number;
+          total_original: number;
+          edit_rate: number;
+        };
+      };
+    }>(url);
+  }
+
+  async getUserPreferences(userId: string) {
+    return this.request<{
+      success: boolean;
+      data: {
+        preferences: any;
+      };
+    }>(`/users/${userId}/preferences`);
+  }
+
+  async updateUserPreferences(userId: string, preferences: any) {
+    return this.request<{
+      success: boolean;
+      message: string;
+      data: {
+        preferences: any;
+      };
+    }>(`/users/${userId}/preferences`, {
+      method: 'PUT',
+      body: JSON.stringify({ preferences }),
+    });
+  }
+
+  async updateChatTrackingPreferences(userId: string, chatTracking: {
+    mode: 'all' | 'recent' | 'selected';
+    maxChats?: number;
+    selectedChatGuids?: string[];
+  }) {
+    // Standardize to selectedChatIds (SDK format) but support legacy selectedChatGuids
+    const payload: any = {
+      mode: chatTracking.mode,
+      maxChats: chatTracking.maxChats,
+    };
+    
+    // Use selectedChatIds if provided, otherwise fall back to selectedChatGuids
+    if (chatTracking.selectedChatGuids && chatTracking.selectedChatGuids.length > 0) {
+      payload.selectedChatIds = chatTracking.selectedChatGuids;
+    }
+    
+    return this.request<{
+      success: boolean;
+      message: string;
+      data: {
+        chatTracking: any;
+      };
+    }>(`/users/${userId}/preferences/chat-tracking`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
 }
 
 // Type definitions
@@ -325,6 +610,11 @@ export interface User {
       promptStyle: 'formal' | 'friendly' | 'playful';
       autoAnalysis: boolean;
     };
+    chatTracking?: {
+      mode: 'all' | 'recent' | 'selected';
+      maxChats?: number;
+      selectedChatGuids?: string[];
+    };
   };
   connectedPlatforms: {
     whatsapp: { connected: boolean; sessionId?: string; lastSync?: Date };
@@ -337,10 +627,14 @@ export interface Contact {
   id: string;
   name: string;
   category: 'family' | 'friends' | 'work';
+  tone?: 'formal' | 'friendly' | 'playful';  // Conversation-specific tone
   status: 'healthy' | 'attention' | 'dormant' | 'wilted';
   size: number;
   closeness: number;
-  recency: number;
+  recency: number;  // Normalized 0-1 (0 = recent, 1 = old)
+  frequency?: number;  // Normalized 0-1 (0 = low, 1 = high) - avg messages/day past 50 days
+  daysSinceContact?: number;  // Raw days since last contact
+  lastContact?: string;  // Human readable "X days ago"
   phoneNumber?: string;
   email?: string;
   platforms: Array<{
@@ -350,10 +644,10 @@ export interface Contact {
   }>;
   metrics: {
     totalMessages: number;
-    lastContact: Date;
+    lastContact: Date | string;
     averageResponseTime: number;
     reciprocity: number;
-    interactionFrequency: number;
+    interactionFrequency?: number;  // Messages per day in past 50 days
   };
   aiAnalysis?: {
     personality?: string;

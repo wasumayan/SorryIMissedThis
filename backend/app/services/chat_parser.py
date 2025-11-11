@@ -4,7 +4,7 @@ Handles parsing of WhatsApp chat exports and conversation analysis
 """
 
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Tuple, Optional
 from collections import Counter
 
@@ -335,7 +335,13 @@ class ChatParser:
         if messages:
             sorted_messages = sorted(messages, key=lambda m: m.timestamp)
             last_message_time = sorted_messages[-1].timestamp
-            days_since_contact = (datetime.now() - last_message_time).days
+            # Ensure both datetimes are timezone-aware for comparison
+            if last_message_time.tzinfo is None:
+                # If naive, assume UTC
+                last_message_time = last_message_time.replace(tzinfo=timezone.utc)
+            # Always use UTC for now to match
+            now = datetime.now(timezone.utc)
+            days_since_contact = (now - last_message_time).days
         else:
             last_message_time = None
             days_since_contact = None
@@ -407,6 +413,9 @@ class ChatParser:
         }
         
         for msg in messages:
+            # Skip messages with no content (images, attachments, etc.)
+            if not msg.content:
+                continue
             words = re.findall(r'\b[a-zA-Z]{4,}\b', msg.content.lower())
             words = [w for w in words if w not in stop_words]
             all_words.extend(words)

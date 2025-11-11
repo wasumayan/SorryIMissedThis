@@ -24,15 +24,68 @@ export default function App() {
   useEffect(() => {
     const checkAuth = async () => {
       try {
+        // 🧪 TESTING MODE: Always force onboarding during development
+        // TODO: Remove this hardcoded flag before production
+        const FORCE_ONBOARDING_FOR_TESTING = true; // Set to false to restore normal auth flow
+        
+        if (FORCE_ONBOARDING_FOR_TESTING) {
+          console.log('[DEBUG] 🧪 TESTING MODE: Force onboarding enabled - clearing localStorage');
+          localStorage.removeItem('simt_token');
+          localStorage.removeItem('user');
+          setCurrentView("onboarding");
+          setIsLoading(false);
+          return;
+        }
+
+        // FOR TESTING: Check for ?reset=true or ?onboarding=true in URL to force onboarding
+        const urlParams = new URLSearchParams(window.location.search);
+        const forceOnboarding = urlParams.get('reset') === 'true' || urlParams.get('onboarding') === 'true';
+        
+        if (forceOnboarding) {
+          console.log('[DEBUG] Force onboarding mode - clearing localStorage');
+          localStorage.removeItem('simt_token');
+          localStorage.removeItem('user');
+          setCurrentView("onboarding");
+          setIsLoading(false);
+          // Clean up URL
+          window.history.replaceState({}, '', window.location.pathname);
+          return;
+        }
+
+        // Check if there's a token in localStorage
+        const token = localStorage.getItem('simt_token');
+        if (!token) {
+          // No token, go to onboarding
+          setCurrentView("onboarding");
+          setIsLoading(false);
+          return;
+        }
+
         const response = await apiClient.getCurrentUser();
         if (response.success && response.data) {
-          setUser(response.data as User);
-          setCurrentView("grove");
+          const userData = response.data as User;
+          // Validate user has a reasonable name (not just "x" or single character)
+          if (userData.name && userData.name.trim().length >= 2) {
+            setUser(userData);
+            setCurrentView("grove");
+          } else {
+            // User has invalid name, clear and re-onboard
+            console.log('User has invalid name, clearing and re-onboarding');
+            localStorage.removeItem('simt_token');
+            localStorage.removeItem('user');
+            setCurrentView("onboarding");
+          }
         } else {
+          // Invalid token, clear it and go to onboarding
+          localStorage.removeItem('simt_token');
+          localStorage.removeItem('user');
           setCurrentView("onboarding");
         }
       } catch (error) {
         console.error('Auth check failed:', error);
+        // Clear invalid token on error
+        localStorage.removeItem('simt_token');
+        localStorage.removeItem('user');
         setCurrentView("onboarding");
       } finally {
         setIsLoading(false);
@@ -123,9 +176,12 @@ export default function App() {
           />
         )}
 
-        {currentView === "conversation" && selectedContact && (
+        {currentView === "conversation" && selectedContact && user && (
           <ConversationView
             contactName={selectedContact.name}
+            contactId={selectedContact.id}
+            conversationId={selectedContact.id}
+            userId={user.id}
             onBack={handleBackToGrove}
           />
         )}

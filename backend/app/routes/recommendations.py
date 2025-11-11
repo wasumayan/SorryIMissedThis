@@ -9,7 +9,7 @@ from flask import Blueprint, request, jsonify, current_app
 
 from app.services.azure_storage import storage
 from app.services.ai_service import AIService
-from app.services import Message as SimtMessage, Conversation as SimtConversation, ConversationMetrics as SimtConversationMetrics
+from app.models import Message as SimtMessage, Conversation as SimtConversation, ConversationMetrics as SimtConversationMetrics
 
 
 recommendations_bp = Blueprint('recommendations', __name__)
@@ -209,7 +209,7 @@ def get_recommendations():
     current_app.logger.info("PRINT 3: get_recommendations() called")
     try:
         # Get parameters
-        user_id = request.args.get('user_id')
+        user_id = request.args.get('userId') or request.args.get('user_id')  # Support both formats
         category = request.args.get('category', 'all')
         regenerate = request.args.get('regenerate', 'false').lower() == 'true'
         print(
@@ -270,14 +270,32 @@ def get_recommendations():
             conversation_id = _extract_value(
                 conversation, 'conversation_id', _extract_value(conversation, 'id'))
 
+            # Get conversation-specific tone
+            # First check if conversation has explicit tone setting
+            conversation_tone = _extract_value(conversation, 'tone')
+            
+            # If no explicit tone, determine from category
+            if not conversation_tone:
+                category = _extract_value(conversation, 'category', 'friends')
+                # Default tones based on category
+                category_tone_map = {
+                    'work': 'formal',
+                    'family': 'friendly',
+                    'friends': 'friendly'
+                }
+                conversation_tone = category_tone_map.get(category, 'friendly')
+            
+            print(f"PRINT 4.8: Using conversation-specific tone for {_extract_value(conversation, 'partner_name', 'Unknown')}: {conversation_tone}", flush=True)
+            current_app.logger.info(f"Using conversation-specific tone: {conversation_tone}")
+
             # Get existing prompts or generate new ones
             if regenerate:
                 print(
-                    f"PRINT 5: About to call ai_service.generate_prompts() for conversation {conversation_id}", flush=True)
+                    f"PRINT 5: About to call ai_service.generate_prompts() for conversation {conversation_id} with tone {conversation_tone}", flush=True)
                 current_app.logger.info(
-                    f"PRINT 5: About to call ai_service.generate_prompts() for conversation {conversation_id}")
+                    f"PRINT 5: About to call ai_service.generate_prompts() for conversation {conversation_id} with tone {conversation_tone}")
                 prompts = ai_service.generate_prompts(
-                    conversation, num_prompts=3)
+                    conversation, num_prompts=3, user_tone_preference=conversation_tone)
                 print(
                     f"PRINT 6: Returned from ai_service.generate_prompts(), got {len(prompts)} prompts", flush=True)
                 current_app.logger.info(
@@ -292,11 +310,11 @@ def get_recommendations():
                 # Generate if no unused prompts available
                 if not prompts:
                     print(
-                        f"PRINT 5: About to call ai_service.generate_prompts() for conversation {conversation_id} (no unused prompts)", flush=True)
+                        f"PRINT 5: About to call ai_service.generate_prompts() for conversation {conversation_id} (no unused prompts) with tone {conversation_tone}", flush=True)
                     current_app.logger.info(
-                        f"PRINT 5: About to call ai_service.generate_prompts() for conversation {conversation_id} (no unused prompts)")
+                        f"PRINT 5: About to call ai_service.generate_prompts() for conversation {conversation_id} (no unused prompts) with tone {conversation_tone}")
                     prompts = ai_service.generate_prompts(
-                        conversation, num_prompts=3)
+                        conversation, num_prompts=3, user_tone_preference=conversation_tone)
                     print(
                         f"PRINT 6: Returned from ai_service.generate_prompts(), got {len(prompts)} prompts", flush=True)
                     current_app.logger.info(
@@ -377,7 +395,7 @@ def mark_prompt_used(prompt_id):
 
     try:
         data = request.get_json()
-        user_id = data.get('user_id') if data else None
+        user_id = (data.get('userId') or data.get('user_id')) if data else None  # Support both formats
 
         if not user_id:
             return jsonify({'error': 'user_id is required in request body'}), 400

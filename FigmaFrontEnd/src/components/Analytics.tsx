@@ -21,14 +21,16 @@ export function Analytics({ user, onBack }: AnalyticsProps) {
       try {
         setIsLoading(true);
 
-        // Fetch overview
-        const overviewResponse = await apiClient.getAnalyticsOverview(user.id, period);
+        // OPTIMIZATION: Fetch both in parallel instead of sequentially
+        const [overviewResponse, trendsResponse] = await Promise.all([
+          apiClient.getAnalyticsOverview(user.id, period),
+          apiClient.getTrends(user.id, period)
+        ]);
+
         if (overviewResponse.success && overviewResponse.data) {
           setOverview(overviewResponse.data.overview);
         }
 
-        // Fetch trends
-        const trendsResponse = await apiClient.getTrends(user.id, period);
         if (trendsResponse.success && trendsResponse.data) {
           setTrends(trendsResponse.data.trends);
         }
@@ -273,39 +275,43 @@ export function Analytics({ user, onBack }: AnalyticsProps) {
           )}
 
           {/* Topic Diversity */}
+          {overview && overview.topicDiversity && overview.topicDiversity.length > 0 && (
           <Card className="p-6">
             <h3 className="mb-4">Conversation Topics</h3>
             <p className="text-muted-foreground mb-6" style={{ fontSize: '0.875rem' }}>
               Diversity of conversation themes this month
             </p>
             <div className="space-y-3">
-              {[
-                { topic: "Work & Career", count: 28, color: "#0d9488" },
-                { topic: "Family & Personal", count: 35, color: "#10b981" },
-                { topic: "Hobbies & Interests", count: 18, color: "#3b82f6" },
-                { topic: "Planning & Events", count: 22, color: "#8b5cf6" },
-                { topic: "Casual Check-ins", count: 41, color: "#06b6d4" },
-              ].map((item) => (
-                <div key={item.topic}>
+                {overview.topicDiversity.map((item: any, index: number) => {
+                  const colors = ["#0d9488", "#10b981", "#3b82f6", "#8b5cf6", "#06b6d4", "#f59e0b", "#ec4899"];
+                  const maxCount = Math.max(...overview.topicDiversity.map((t: any) => t.count || 0), 1);
+                  const topicName = item._id || item.topic || `Topic ${index + 1}`;
+                  const count = item.count || 0;
+                  const color = colors[index % colors.length];
+                  
+                  return (
+                    <div key={index}>
                   <div className="flex items-center justify-between mb-2">
-                    <span style={{ fontSize: '0.875rem' }}>{item.topic}</span>
+                        <span style={{ fontSize: '0.875rem' }}>{topicName}</span>
                     <span className="text-muted-foreground" style={{ fontSize: '0.875rem' }}>
-                      {item.count} conversations
+                          {count} conversations
                     </span>
                   </div>
                   <div className="h-2 bg-muted rounded-full overflow-hidden">
                     <div
                       className="h-full rounded-full transition-all"
                       style={{
-                        width: `${(item.count / 41) * 100}%`,
-                        backgroundColor: item.color,
+                            width: `${(count / maxCount) * 100}%`,
+                            backgroundColor: color,
                       }}
                     />
                   </div>
                 </div>
-              ))}
+                  );
+                })}
             </div>
           </Card>
+          )}
         </div>
         </ScrollArea>
       </div>
