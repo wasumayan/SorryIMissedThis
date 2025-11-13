@@ -6,6 +6,7 @@ from flask import Blueprint, request, jsonify, current_app
 import zipfile
 import os
 import tempfile
+import re
 from werkzeug.utils import secure_filename
 
 from app.services.chat_parser import ChatParser
@@ -23,33 +24,74 @@ def allowed_file(filename):
            filename.rsplit('.', 1)[1].lower() in {'txt', 'zip'}
 
 
+def anonymize_names(content):
+    """
+    Replace names in chat content with anonymized identifiers (User 1, User 2, etc.)
+
+    Expected format: [timestamp] name: message
+
+    Args:
+        content: String containing chat messages
+
+    Returns:
+        String with names replaced by User 1, User 2, etc.
+    """
+    # Pattern to match: [timestamp] name: message
+    # Matches [ followed by anything, then ], whitespace, name (up to colon), then colon
+    pattern = r'(\[.*?\]\s*)([^:]+?)(\s*:)'
+
+    # Find all unique names
+    name_map = {}
+    user_counter = 1
+
+    # First pass: identify all unique names
+    for match in re.finditer(pattern, content):
+        name = match.group(2).strip()
+        if name and name not in name_map:
+            name_map[name] = f"User {user_counter}"
+            user_counter += 1
+
+    # Second pass: replace all occurrences of each name
+    deanonymized_content = content
+    for original_name, anonymized_name in name_map.items():
+        # Replace the name in the pattern context: [timestamp] name:
+        # We need to be careful to only replace within the message header context
+        pattern_with_name = r'(\[.*?\]\s*)' + \
+            re.escape(original_name) + r'(\s*:)'
+        replacement = r'\1' + anonymized_name + r'\2'
+        deanonymized_content = re.sub(
+            pattern_with_name, replacement, deanonymized_content)
+
+    return deanonymized_content
+
+
 @upload_bp.route('/transcript', methods=['POST'])
 def upload_transcript():
     """
     Upload and process chat transcript
-    
+
     Expected:
         - file: .txt or .zip file containing WhatsApp chat export
         - user_id: User identifier
         - user_display_name: User's display name in the chat (optional)
-    
+
     Returns:
         JSON response with processing results
     """
-    
+
     try:
         # Validate request
         if 'file' not in request.files:
             return jsonify({'error': 'No file provided'}), 400
-        
+
         file = request.files['file']
-        
+
         if file.filename == '':
             return jsonify({'error': 'Empty filename'}), 400
-        
+
         if not allowed_file(file.filename):
             return jsonify({'error': 'File type not allowed. Please upload .txt or .zip'}), 400
-        
+
         # Get user information
         user_id = request.form.get('user_id', 'default_user')
         user_display_name = request.form.get('user_display_name', user_id)
@@ -57,55 +99,61 @@ def upload_transcript():
         # Ensure user exists in database
         user = storage.get_user_by_id(user_id)
         if not user:
-            current_app.logger.info(f"User {user_id} not found in database during upload")
+            current_app.logger.info(
+                f"User {user_id} not found in database during upload")
             return jsonify({'error': 'User not found. Please register first.'}), 404
-        
+
         # Process file
-        current_app.logger.info(f"Processing upload from user {user_id}: {file.filename}")
-        
+        current_app.logger.info(
+            f"Processing upload from user {user_id}: {file.filename}")
+
         with tempfile.TemporaryDirectory() as temp_dir:
             # Save uploaded file
             filename = secure_filename(file.filename)
             file_path = os.path.join(temp_dir, filename)
             file.save(file_path)
-            
+
             # Extract text files
             text_files = []
-            
+
             if filename.endswith('.zip'):
                 # Extract zip file
                 with zipfile.ZipFile(file_path, 'r') as zip_ref:
                     zip_ref.extractall(temp_dir)
-                
+
                 # Find all .txt files
                 for root, dirs, files in os.walk(temp_dir):
                     for fname in files:
                         if fname.endswith('.txt'):
                             text_files.append(os.path.join(root, fname))
-                
+
                 if not text_files:
                     return jsonify({'error': 'No .txt files found in zip archive'}), 400
-            
+
             else:
                 # Single .txt file
                 text_files = [file_path]
-            
+
             # Parse all chat files
             parser = ChatParser(user_id)
             all_conversations = []
-            
+
             for text_file in text_files:
                 with open(text_file, 'r', encoding='utf-8', errors='ignore') as f:
                     content = f.read()
-                
+
+                content = anonymize_names(content)
+
                 # Parse messages
                 messages = parser.parse_chat_file(content, user_display_name)
 
                 if not messages:
-                    current_app.logger.warning(f"No messages found in {text_file}")
+                    current_app.logger.warning(
+                        f"No messages found in {text_file}")
                     continue
 
-                current_app.logger.info(f"Parsed {len(messages)} messages from {text_file}")
+                current_app.logger.info(
+                    f"Parsed {len(messages)} messages from {text_file}")
 
                 # Check if this is a group chat (multiple senders besides user)
                 senders = set(msg.sender for msg in messages)
@@ -113,20 +161,24 @@ def upload_transcript():
 
                 if len(senders) > 1:
                     # Group chat - create individual conversations for each person
-                    current_app.logger.info(f"Detected group chat with {len(senders)} participants")
-                    conversations = parser.create_conversations_from_group(messages, user_display_name)
+                    current_app.logger.info(
+                        f"Detected group chat with {len(senders)} participants")
+                    conversations = parser.create_conversations_from_group(
+                        messages, user_display_name)
                     all_conversations.extend(conversations)
-                    current_app.logger.info(f"Created {len(conversations)} individual conversations from group chat")
+                    current_app.logger.info(
+                        f"Created {len(conversations)} individual conversations from group chat")
                 else:
                     # One-on-one conversation
-                    conversation = parser.create_conversation(messages, user_display_name)
+                    conversation = parser.create_conversation(
+                        messages, user_display_name)
                     if conversation:  # Only add if not None
                         all_conversations.append(conversation)
                         current_app.logger.info(
                             f"Parsed conversation with {conversation.partner_name}: "
                             f"{len(messages)} messages"
                         )
-            
+
             if not all_conversations:
                 return jsonify({'error': 'No valid conversations found in uploaded file(s)'}), 400
 
@@ -190,15 +242,16 @@ def upload_transcript():
             )
 
             return jsonify(response), 200
-    
+
     except zipfile.BadZipFile:
         return jsonify({'error': 'Invalid zip file'}), 400
-    
+
     except UnicodeDecodeError:
         return jsonify({'error': 'Unable to read file. Please ensure it is a valid text file'}), 400
-    
+
     except Exception as e:
-        current_app.logger.error(f"Error processing upload: {str(e)}", exc_info=True)
+        current_app.logger.error(
+            f"Error processing upload: {str(e)}", exc_info=True)
         return jsonify({
             'error': 'Error processing file',
             'message': str(e)
@@ -209,11 +262,11 @@ def upload_transcript():
 def get_upload_status(user_id):
     """
     Get upload/processing status for a user
-    
+
     Returns:
         User statistics and conversation summary
     """
-    
+
     try:
         user = storage.get_user_by_id(user_id)
 
@@ -242,14 +295,14 @@ def get_upload_status(user_id):
                     'days_since_contact': c.metrics.days_since_contact,
                     'health': c.get_relationship_health()
                 })
-        
+
         return jsonify({
             'user_id': user_id,
             'display_name': user.get('name', user_id) if isinstance(user, dict) else user.display_name,
             'stats': stats,
             'recent_conversations': conversation_summary
         }), 200
-    
+
     except Exception as e:
         current_app.logger.error(f"Error getting upload status: {str(e)}")
         return jsonify({'error': 'Error retrieving status'}), 500
