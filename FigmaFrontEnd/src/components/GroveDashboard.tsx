@@ -6,7 +6,6 @@ import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
-import { ScrollArea } from "./ui/scroll-area";
 import { Droplet, Search, Calendar, TrendingUp, RefreshCw } from "lucide-react";
 import { apiClient, User, Contact, DailySuggestion } from "../services/api";
 
@@ -615,8 +614,8 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
         </div>
 
         {/* Right Panel - Today's Prompts & Dormant Branches */}
-        <div className="w-80 border-l bg-card/30 backdrop-blur-sm flex flex-col">
-          <ScrollArea className="flex-1">
+        <div className="w-80 border-l bg-card/30 backdrop-blur-sm flex flex-col min-h-0">
+          <div className="flex-1 overflow-y-auto min-h-0">
             <div className="p-6 space-y-6">
               {/* Today's Prompts */}
               <div className="space-y-3">
@@ -735,7 +734,7 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
                 </Button>
               </div>
             </div>
-          </ScrollArea>
+          </div>
         </div>
       </div>
 

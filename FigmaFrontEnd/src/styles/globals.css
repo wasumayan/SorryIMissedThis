@@ -152,12 +152,25 @@
 }
 
 @layer base {
-  * {
-    @apply border-border outline-ring/50;
-  }
-
+  /* Don't apply borders to every element globally — this creates noisy outlines
+     and breaks the visual design. Instead keep body-level color + a dedicated
+     utility for scrollable areas. */
   body {
     @apply bg-background text-foreground;
+  }
+
+  /* Ensure root elements fill the viewport so h-screen and flex layouts behave */
+  html, body, #root {
+    height: 100%;
+  }
+
+  /* Utility: consistent touch-friendly scrolling for scrollable panes */
+  .scrollable {
+    -webkit-overflow-scrolling: touch; /* iOS momentum scrolling */
+    scroll-behavior: smooth;
+    overscroll-behavior: contain; /* prevent parent bounce */
+    touch-action: pan-y;
+    overflow-y: auto;
   }
 }
 

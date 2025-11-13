@@ -228,12 +228,14 @@ class ApiClient {
     }>(endpoint);
   }
 
-  async getConversation(id: string) {
-    return this.request<{ conversation: Conversation }>(`/conversations/${id}`);
+  async getConversation(id: string, userId?: string) {
+    const params = userId ? `?userId=${encodeURIComponent(userId)}` : '';
+    return this.request<{ conversation: Conversation }>(`/conversations/${id}${params}`);
   }
 
-  async getConversationSummary(id: string) {
-    return this.request<{ summary: ConversationSummary }>(`/conversations/${id}/summary`);
+  async getConversationSummary(id: string, userId?: string) {
+    const params = userId ? `?userId=${encodeURIComponent(userId)}` : '';
+    return this.request<{ summary: ConversationSummary }>(`/conversations/${id}/summary${params}`);
   }
 
   async getConversationPrompts(conversationId: string, unusedOnly: boolean = true) {

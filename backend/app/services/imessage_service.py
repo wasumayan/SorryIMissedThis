@@ -27,7 +27,7 @@ class iMessageService:
         # Defaults to localhost:4000 where the bridge server runs
         self.server_url = os.getenv('PHOTON_SERVER_URL', 'http://localhost:4000')
         self.api_key = os.getenv('PHOTON_API_KEY', '')
-        
+
         if not self.server_url:
             logger.warning("PHOTON_SERVER_URL not set. iMessage integration disabled.")
             self.enabled = False
@@ -35,17 +35,54 @@ class iMessageService:
             self.enabled = True
             # Ensure URL doesn't end with /
             self.server_url = self.server_url.rstrip('/')
-        
-        self.client = httpx.AsyncClient(
+
+        # Don't create AsyncClient here - it will be tied to a specific event loop
+        # Instead, create it in _get_client() for each request
+        self._client = None
+        self._client_loop = None  # Track which event loop the client belongs to
+
+        self.message_callbacks: List[Callable] = []
+        self.is_listening = False
+
+    def _get_client(self) -> httpx.AsyncClient:
+        """Get or create AsyncClient for the current event loop"""
+        # Check if we need a new client (first time or event loop changed)
+        try:
+            # Try to get the current event loop
+            loop = asyncio.get_event_loop()
+            # If client exists, loop is still running, AND it's the same loop, reuse it
+            if (self._client is not None and
+                self._client_loop is loop and
+                not loop.is_closed()):
+                return self._client
+
+            # If we have a client but loop changed, close the old client
+            if self._client is not None and self._client_loop is not loop:
+                try:
+                    # Attempt to close old client synchronously (best effort)
+                    if self._client_loop and not self._client_loop.is_closed():
+                        self._client_loop.run_until_complete(self._client.aclose())
+                except:
+                    pass  # Ignore errors closing old client
+                self._client = None
+                self._client_loop = None
+        except RuntimeError:
+            # No event loop or it's closed, create new client
+            loop = None
+
+        # Create new client for current event loop
+        self._client = httpx.AsyncClient(
             timeout=30.0,
             headers={
                 'Content-Type': 'application/json',
                 'Authorization': f'Bearer {self.api_key}' if self.api_key else None
             } if self.api_key else {'Content-Type': 'application/json'}
         )
-        
-        self.message_callbacks: List[Callable] = []
-        self.is_listening = False
+        try:
+            self._client_loop = asyncio.get_event_loop()
+        except RuntimeError:
+            self._client_loop = None
+        return self._client
 
     async def connect(self) -> Dict:
         """Connect to Photon server and get user identity
@@ -67,7 +104,8 @@ class iMessageService:
             logger.debug(f"[DEBUG] [{request_id}] connect: Requesting {url}")
             
             # Get server info which includes user's iMessage account
-            response = await self.client.get(url)
+            client = self._get_client()
+            response = await client.get(url)
             elapsed = (time.time() - start_time) * 1000
             logger.debug(f"[DEBUG] [{request_id}] connect: Response status={response.status_code} (took {elapsed:.2f}ms)")
             
@@ -116,8 +154,9 @@ class iMessageService:
             url = f"{self.server_url}/api/chats"
             params = {'limit': limit}
             logger.debug(f"[DEBUG] get_chats: Requesting {url} with params {params}")
-            
-            response = await self.client.get(url, params=params)
+
+            client = self._get_client()
+            response = await client.get(url, params=params)
             logger.debug(f"[DEBUG] get_chats: Response status={response.status_code}")
             
             if response.status_code == 200:
@@ -142,7 +181,8 @@ class iMessageService:
             return []
         
         try:
-            response = await self.client.get(
+            client = self._get_client()
+            response = await client.get(
                 f"{self.server_url}/api/messages",
                 params={
                     'chatGuid': chat_id,  # Photon server API uses chatGuid parameter name
@@ -196,8 +236,9 @@ class iMessageService:
                 payload['content'] = content
             elif message:
                 payload['message'] = message
-            
-            response = await self.client.post(
+
+            client = self._get_client()
+            response = await client.post(
                 f"{self.server_url}/api/messages/send",
                 json=payload
             )
@@ -602,7 +643,9 @@ class iMessageService:
     async def close(self):
         """Close the service and cleanup"""
         self.stop_listening()
-        await self.client.aclose()
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
 
 
 # Singleton instance

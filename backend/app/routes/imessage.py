@@ -50,8 +50,10 @@ def connect_imessage():
         current_app.logger.debug(f"[DEBUG] [{request_id}] Calling service.connect()...")
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        connect_result = loop.run_until_complete(service.connect())
-        loop.close()
+        try:
+            connect_result = loop.run_until_complete(service.connect())
+        finally:
+            loop.close()
         
         elapsed = (time.time() - start_time) * 1000
         current_app.logger.debug(f"[DEBUG] [{request_id}] Connect result: connected={connect_result.get('connected')} (took {elapsed:.2f}ms)")
@@ -287,8 +289,8 @@ def sync_imessage():
             async def sync_with_new_client():
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     # Temporarily replace the service's client
-                    old_client = service.client
-                    service.client = client
+                    old_client = service._client
+                    service._client = client
                     try:
                         # Pass tracking preferences to sync_conversations so it can filter BEFORE fetching messages
                         return await service.sync_conversations(
@@ -298,7 +300,7 @@ def sync_imessage():
                             selected_chat_ids=selected_chat_ids
                         )
                     finally:
-                        service.client = old_client
+                        service._client = old_client
             
             all_conversations = loop.run_until_complete(sync_with_new_client())
             sync_elapsed = (time.time() - sync_start_time) * 1000
@@ -596,9 +598,11 @@ def start_listening():
         def run_listener():
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            loop.run_until_complete(service.start_listening())
-            loop.close()
-        
+            try:
+                loop.run_until_complete(service.start_listening())
+            finally:
+                loop.close()
+
         thread = threading.Thread(target=run_listener, daemon=True)
         thread.start()
         
@@ -641,12 +645,12 @@ def get_available_chats():
             async def get_chats_with_new_client():
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     # Temporarily replace the service's client
-                    old_client = service.client
-                    service.client = client
+                    old_client = service._client
+                    service._client = client
                     try:
                         return await service.get_chats(limit=limit)
                     finally:
-                        service.client = old_client
+                        service._client = old_client
             
             chats = loop.run_until_complete(get_chats_with_new_client())
         except Exception as e:
@@ -711,74 +715,6 @@ def get_available_chats():
     
     except Exception as e:
         current_app.logger.error(f"Error getting chats: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-
-@imessage_bp.route('/preferences/chat-tracking', methods=['POST'])
-def update_chat_tracking_preferences():
-    """
-    Update user's chat tracking preferences
-    
-    Expected JSON body:
-    {
-        "userId": "user-id",
-        "mode": "all" | "recent" | "selected",
-        "maxChats": 50,  // For "recent" mode
-        "selectedChatIds": ["chatId1", "chatId2"]  // For "selected" mode
-    }
-    """
-    try:
-        data = request.get_json()
-        user_id = get_user_id(data)
-        mode = data.get('mode', 'all')
-        max_chats = data.get('maxChats', 50)
-        selected_chat_ids = data.get('selectedChatIds', []) or data.get('selectedChatGuids', [])  # Support legacy format
-        
-        if not user_id:
-            return jsonify({'error': 'userId is required'}), 400
-        
-        if mode not in ['all', 'recent', 'selected']:
-            return jsonify({'error': 'Invalid mode. Must be "all", "recent", or "selected"'}), 400
-        
-        # Validate mode-specific requirements
-        if mode == 'recent' and (not isinstance(max_chats, int) or max_chats < 1):
-            return jsonify({'error': 'maxChats must be a positive integer for "recent" mode'}), 400
-        
-        if mode == 'selected' and (not selected_chat_ids or len(selected_chat_ids) == 0):
-            return jsonify({'error': 'selectedChatIds is required and cannot be empty for "selected" mode'}), 400
-        
-        # Get user
-        user = storage.get_user_by_id(user_id)
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
-        
-        # Update preferences
-        preferences = user.get('preferences', {}) if isinstance(user, dict) else getattr(user, 'preferences', {})
-        preferences['chatTracking'] = {
-            'mode': mode,
-            'maxChats': max_chats if mode == 'recent' else 50,
-            'selectedChatIds': selected_chat_ids if mode == 'selected' else []
-        }
-        
-        # Update user
-        success = storage.update_user(user_id, {'preferences': preferences})
-        
-        if success:
-            return jsonify({
-                'success': True,
-                'message': 'Chat tracking preferences updated',
-                'data': {
-                    'preferences': preferences['chatTracking']
-                }
-            }), 200
-        else:
-            return jsonify({'error': 'Failed to update preferences'}), 500
-    
-    except Exception as e:
-        current_app.logger.error(f"Error updating chat tracking preferences: {str(e)}")
         return jsonify({
             'success': False,
             'error': str(e)
@@ -876,13 +812,12 @@ def send_message():
                 result = loop.run_until_complete(service.send_message(chat_id, content=content))
             else:
                 result = loop.run_until_complete(service.send_message(chat_id, message=message))
-            loop.close()
-            
+
             # Track prompt usage if this was an AI-generated prompt
             prompt_id = data.get('promptId')
             original_prompt_text = data.get('originalPromptText')
             was_edited = data.get('wasEdited', False)
-            
+
             if prompt_id and original_prompt_text and message_text:
                 # Calculate edit similarity (simple character-based)
                 if was_edited:
@@ -893,7 +828,7 @@ def send_message():
                     similarity = common_chars / max(len(original_lower), len(sent_lower), 1)
                 else:
                     similarity = 1.0
-                
+
                 # Track usage
                 if user_id:
                     storage.track_prompt_usage(
@@ -905,15 +840,14 @@ def send_message():
                         was_edited=was_edited,
                         edit_similarity=similarity
                     )
-            
+
             return jsonify({
                 'success': True,
                 'message': 'Message sent successfully',
                 'data': result
             }), 200
-        except Exception as send_error:
+        finally:
             loop.close()
-            raise send_error
     
     except Exception as e:
         current_app.logger.error(f"Error sending iMessage: {str(e)}")

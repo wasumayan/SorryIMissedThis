@@ -25,7 +25,12 @@ class Message:
     @classmethod
     def from_dict(cls, data: Dict) -> 'Message':
         """Create from Firestore dictionary"""
-        data['timestamp'] = datetime.fromisoformat(data['timestamp'])
+        # Handle timestamp - might already be a datetime object from Cosmos DB
+        if isinstance(data['timestamp'], str):
+            data['timestamp'] = datetime.fromisoformat(data['timestamp'])
+        elif not isinstance(data['timestamp'], datetime):
+            # If it's neither string nor datetime, use current time as fallback
+            data['timestamp'] = datetime.now()
         return cls(**data)
 
 
@@ -61,7 +66,10 @@ class ConversationMetrics:
     def from_dict(cls, data: Dict) -> 'ConversationMetrics':
         """Create from Firestore dictionary"""
         if 'last_message_time' in data and data['last_message_time']:
-            data['last_message_time'] = datetime.fromisoformat(data['last_message_time'])
+            # Handle last_message_time - might already be a datetime object from Cosmos DB
+            if isinstance(data['last_message_time'], str):
+                data['last_message_time'] = datetime.fromisoformat(data['last_message_time'])
+            # If it's already a datetime, leave it as is
         return cls(**data)
 
 
@@ -134,8 +142,19 @@ class Conversation:
         """Create from Firestore dictionary"""
         data['messages'] = [Message.from_dict(msg) for msg in data['messages']]
         data['metrics'] = ConversationMetrics.from_dict(data['metrics'])
-        data['created_at'] = datetime.fromisoformat(data['created_at'])
-        data['updated_at'] = datetime.fromisoformat(data['updated_at'])
+
+        # Handle created_at - might already be a datetime object from Cosmos DB
+        if isinstance(data['created_at'], str):
+            data['created_at'] = datetime.fromisoformat(data['created_at'])
+        elif not isinstance(data['created_at'], datetime):
+            data['created_at'] = datetime.now()
+
+        # Handle updated_at - might already be a datetime object from Cosmos DB
+        if isinstance(data['updated_at'], str):
+            data['updated_at'] = datetime.fromisoformat(data['updated_at'])
+        elif not isinstance(data['updated_at'], datetime):
+            data['updated_at'] = datetime.now()
+
         return cls(**data)
     
     def get_relationship_health(self) -> str:
@@ -180,7 +199,12 @@ class ConversationPrompt:
     @classmethod
     def from_dict(cls, data: Dict) -> 'ConversationPrompt':
         """Create from Firestore dictionary"""
-        data['created_at'] = datetime.fromisoformat(data['created_at'])
+        # Handle created_at - might already be a datetime object from Cosmos DB
+        if isinstance(data['created_at'], str):
+            data['created_at'] = datetime.fromisoformat(data['created_at'])
+        elif not isinstance(data['created_at'], datetime):
+            # If it's neither string nor datetime, use current time as fallback
+            data['created_at'] = datetime.now()
         return cls(**data)
 
 
@@ -208,6 +232,16 @@ class User:
     @classmethod
     def from_dict(cls, data: Dict) -> 'User':
         """Create from Firestore dictionary"""
-        data['created_at'] = datetime.fromisoformat(data['created_at'])
-        data['last_login'] = datetime.fromisoformat(data['last_login'])
+        # Handle created_at - might already be a datetime object from Cosmos DB
+        if isinstance(data['created_at'], str):
+            data['created_at'] = datetime.fromisoformat(data['created_at'])
+        elif not isinstance(data['created_at'], datetime):
+            data['created_at'] = datetime.now()
+
+        # Handle last_login - might already be a datetime object from Cosmos DB
+        if isinstance(data['last_login'], str):
+            data['last_login'] = datetime.fromisoformat(data['last_login'])
+        elif not isinstance(data['last_login'], datetime):
+            data['last_login'] = datetime.now()
+
         return cls(**data)

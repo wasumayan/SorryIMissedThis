@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
-import { ScrollArea } from "./ui/scroll-area";
 import { ArrowLeft, TrendingUp, Users, MessageSquare, Heart } from "lucide-react";
 import { apiClient, User, AnalyticsOverview, TrendsData } from "../services/api";
 
@@ -62,8 +61,8 @@ export function Analytics({ user, onBack }: AnalyticsProps) {
         </div>
       </div>
 
-      <div className="flex-1 overflow-hidden">
-        <ScrollArea className="h-full">
+      <div className="flex-1 overflow-hidden min-h-0">
+        <div className="h-full overflow-y-auto">
           <div className="max-w-6xl mx-auto p-6 space-y-6">
           {/* Stats Cards */}
           {isLoading ? (
@@ -313,7 +312,7 @@ export function Analytics({ user, onBack }: AnalyticsProps) {
           </Card>
           )}
         </div>
-        </ScrollArea>
+        </div>
       </div>
     </div>
   );

@@ -3,7 +3,6 @@ import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Textarea } from "./ui/textarea";
-import { ScrollArea } from "./ui/scroll-area";
 import { Slider } from "./ui/slider";
 import { 
   ArrowLeft, 
@@ -35,6 +34,7 @@ interface ConversationViewProps {
 
 interface Prompt {
   id?: string;
+  prompt_id?: string;
   text: string;
   reason: string;
   type?: string;
@@ -70,9 +70,9 @@ export function ConversationView({ contactName, contactId, conversationId, userI
 
         // OPTIMIZATION: Fetch all data in parallel instead of sequentially
         const [convResponse, promptsResponse, summaryResponse] = await Promise.allSettled([
-          apiClient.getConversation(convId || ''),
+          apiClient.getConversation(convId || '', userId),
           apiClient.getConversationPrompts(convId || ''),
-          apiClient.getConversationSummary(convId || '').catch(() => ({ success: false, data: null })) // Summary is optional
+          apiClient.getConversationSummary(convId || '', userId).catch(() => ({ success: false, data: null })) // Summary is optional
         ]);
 
         // Process conversation details
@@ -123,7 +123,10 @@ export function ConversationView({ contactName, contactId, conversationId, userI
 
         // Process summary (optional)
         if (summaryResponse.status === 'fulfilled' && summaryResponse.value.success && summaryResponse.value.data) {
-          setConversationSummary(summaryResponse.value.data.summary || '');
+          // Extract the summary text from the nested structure
+          const summaryData = summaryResponse.value.data.summary;
+          const summaryText = typeof summaryData === 'string' ? summaryData : summaryData?.summary || '';
+          setConversationSummary(summaryText);
         }
 
       } catch (error) {
@@ -196,19 +199,24 @@ export function ConversationView({ contactName, contactId, conversationId, userI
       alert('Cannot send message: conversation ID not available');
       return;
     }
-    
-    if (prompts.length === 0) {
+
+    if (prompts.length === 0 || !prompts[selectedPrompt]) {
       alert('No prompts available. Please generate prompts first.');
       return;
     }
-    
+
     const originalPrompt = prompts[selectedPrompt];
+    if (!originalPrompt || !originalPrompt.text) {
+      alert('Invalid prompt selected. Please select a valid prompt.');
+      return;
+    }
+
     const messageToSend = customPrompt || originalPrompt.text;
     if (!messageToSend.trim()) {
       alert('Please enter a message');
       return;
     }
-    
+
     // Determine if message was edited
     const wasEdited = customPrompt.trim() !== '' && customPrompt.trim() !== originalPrompt.text.trim();
     
@@ -241,15 +249,15 @@ export function ConversationView({ contactName, contactId, conversationId, userI
   };
 
   return (
-    <div className="h-screen flex flex-col bg-background">
+    <div className="fixed inset-0 flex flex-col bg-background">
       {/* Header */}
-      <div className="border-b bg-card px-6 py-4 flex items-center gap-4">
+      <div className="border-b bg-card px-4 sm:px-6 py-4 flex items-center gap-4 flex-shrink-0">
         <Button variant="ghost" size="icon" onClick={onBack}>
           <ArrowLeft className="w-5 h-5" />
         </Button>
-        <div className="flex-1">
-          <h2>{contactName}</h2>
-          <div className="flex items-center gap-2 mt-1">
+        <div className="flex-1 min-w-0">
+          <h2 className="truncate">{contactName}</h2>
+          <div className="flex items-center gap-2 mt-1 flex-wrap">
             <Badge variant="outline" className="text-xs">
               Last contact: {formatDaysAgo(daysSinceContact)}
             </Badge>
@@ -261,22 +269,22 @@ export function ConversationView({ contactName, contactId, conversationId, userI
         </div>
       </div>
 
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left: Conversation Thread */}
-        <div className="flex-1 flex flex-col border-r">
+      <div className="flex-1 flex flex-col lg:flex-row overflow-visible min-h-0">
+  {/* Left: Conversation Thread */}
+  <div className="flex-1 lg:flex-[1] flex flex-col lg:border-r overflow-visible min-h-0">
           {/* AI Summary */}
           {conversationSummary && (
-          <div className="bg-gradient-to-r from-primary/10 via-accent/10 to-secondary/20 border-b p-4">
+          <div className="bg-gradient-to-r from-primary/10 via-accent/10 to-secondary/20 border-b p-4 shrink-0">
             <div className="flex items-start gap-3">
               <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-primary/50 flex items-center justify-center shrink-0">
                 <Sparkles className="w-5 h-5 text-white" />
               </div>
-              <div className="flex-1">
+              <div className="flex-1 min-w-0">
                 <h4 className="mb-2">Conversation Summary</h4>
                 <p className="text-muted-foreground" style={{ fontSize: '0.875rem' }}>
                     {conversationSummary}
                 </p>
-                <div className="flex items-center gap-4 mt-3">
+                <div className="flex items-center gap-4 mt-3 flex-wrap">
                   <div className="flex items-center gap-2">
                     <div className="text-xs text-muted-foreground">Reciprocity:</div>
                     <div className="flex gap-0.5">
@@ -301,8 +309,10 @@ export function ConversationView({ contactName, contactId, conversationId, userI
             </div>
           )}
 
-          {/* Messages */}
-          <ScrollArea className="flex-1 p-6">
+          {/* Messages - using native div with overflow for reliable scrolling */}
+          <div 
+            className="flex-1 p-4 sm:p-6 scrollable"
+          >
             <div className="space-y-4 max-w-3xl">
               {isLoading ? (
                 <div className="flex items-center justify-center py-12">
@@ -339,31 +349,34 @@ export function ConversationView({ contactName, contactId, conversationId, userI
                 ))
               )}
             </div>
-          </ScrollArea>
+          </div>
         </div>
 
-        {/* Right: Prompt Composer */}
-        <div className="w-[480px] flex flex-col bg-card/30">
-          <div className="border-b p-4">
+  {/* Right: Prompt Composer */}
+  <div className="w-full lg:w-[480px] flex flex-col bg-card/30 lg:border-t-0 border-t overflow-visible min-h-0">
+          <div className="border-b p-4 flex-shrink-0">
             <h3>Compose Message</h3>
             <p className="text-muted-foreground mt-1" style={{ fontSize: '0.875rem' }}>
               AI-suggested prompts tailored to your conversation
             </p>
           </div>
 
-          <ScrollArea className="flex-1 p-6">
+          <div 
+            className="flex-1 p-4 sm:p-6 scrollable"
+          >
             <div className="space-y-6">
               {/* Suggested Prompts */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                 <label>Suggested Prompts</label>
-                  {prompts.length === 0 && (
+                  {prompts.length === 0 && !isLoading && (
                     <Button
-                      variant="ghost"
+                      variant="default"
                       size="sm"
                       onClick={() => generateNewPrompts(conversationId || contactId || '')}
-                      className="text-xs"
+                      className="bg-primary hover:bg-primary/90 text-primary-foreground"
                     >
+                      <Sparkles className="w-3 h-3 mr-1" />
                       Generate
                     </Button>
                   )}
@@ -404,21 +417,21 @@ export function ConversationView({ contactName, contactId, conversationId, userI
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                 <label>Edit Your Message</label>
-                  {customPrompt && customPrompt.trim() !== prompts[selectedPrompt].text.trim() && (
+                  {customPrompt && prompts[selectedPrompt] && customPrompt.trim() !== prompts[selectedPrompt].text.trim() && (
                     <Badge variant="outline" className="text-xs">
                       Edited
                     </Badge>
                   )}
                 </div>
                 <Textarea
-                  value={customPrompt || prompts[selectedPrompt].text}
+                  value={customPrompt || (prompts[selectedPrompt]?.text || '')}
                   onChange={(e) => setCustomPrompt(e.target.value)}
                   rows={4}
                   placeholder="Click a prompt above, then edit it here to customize your message..."
                   className="resize-none"
                 />
                 <p className="text-xs text-muted-foreground">
-                  {customPrompt && customPrompt.trim() !== prompts[selectedPrompt].text.trim()
+                  {customPrompt && prompts[selectedPrompt] && customPrompt.trim() !== prompts[selectedPrompt].text.trim()
                     ? "✓ Your message has been customized"
                     : "You can edit the selected prompt above to personalize it"}
                 </p>
@@ -481,10 +494,10 @@ export function ConversationView({ contactName, contactId, conversationId, userI
               </Card>
               )}
             </div>
-          </ScrollArea>
+          </div>
 
           {/* Actions */}
-          <div className="border-t p-4 space-y-2 bg-card">
+          <div className="border-t p-4 space-y-2 bg-card flex-shrink-0">
             {sent ? (
               <div className="flex items-center justify-center gap-2 py-3 text-primary">
                 <CheckCircle className="w-5 h-5" />

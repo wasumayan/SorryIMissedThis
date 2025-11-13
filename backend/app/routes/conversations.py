@@ -62,7 +62,8 @@ def get_conversations():
         return jsonify({
             'user_id': user_id,
             'total': len(formatted_conversations),
-            'conversations': formatted_conversations
+            'conversations': formatted_conversations,
+            'hasMore': len(formatted_conversations) >= limit
         }), 200
     
     except ValueError:
@@ -95,26 +96,36 @@ def get_conversation_summary(conversation_id):
         if not conversation:
             return jsonify({'error': 'Conversation not found'}), 404
         
-        # Use AI service to generate summary
-        from app.services.ai_service import AIService
-        from app.models import Conversation, Message, ConversationMetrics
-        
-        ai_service = AIService()
-        
-        # Convert to Conversation object
-        messages = [Message.from_dict(m) for m in conversation.get('messages', [])]
-        metrics = ConversationMetrics.from_dict(conversation.get('metrics', {}))
-        conv_obj = Conversation(
-            user_id=user_id,
-            partner_name=conversation.get('partnerName') or conversation.get('partner_name', 'Unknown'),
-            partner_id=conversation.get('partnerId') or conversation.get('partner_id', ''),
-            messages=messages,
-            metrics=metrics,
-            category=conversation.get('category', 'friends')
-        )
-        
-        # Generate summary
-        analysis = ai_service.analyze_conversation(conv_obj)
+        # For now, return a simple summary based on metadata
+        # Full AI summary would require fetching messages from iMessage (not stored in cloud)
+        metrics = conversation.get('metrics', {})
+
+        # Simple summary based on available metadata
+        days_since = metrics.get('days_since_contact', 0)
+        total_messages = metrics.get('total_messages', 0)
+        reciprocity = metrics.get('reciprocity', 0.5)
+
+        summary_text = f"You have exchanged {total_messages} messages. "
+        if days_since == 0:
+            summary_text += "Last contact was today. "
+        elif days_since == 1:
+            summary_text += "Last contact was yesterday. "
+        else:
+            summary_text += f"Last contact was {days_since} days ago. "
+
+        if reciprocity > 0.6:
+            summary_text += "The conversation is well-balanced."
+        elif reciprocity < 0.4:
+            summary_text += "You may want to reach out more often."
+        else:
+            summary_text += "The conversation has reasonable balance."
+
+        analysis = {
+            'summary': summary_text,
+            'sentiment': {'overall': 'neutral'},
+            'topics': [],
+            'followUpSuggestions': []
+        }
         
         return jsonify({
             'success': True,
@@ -149,44 +160,49 @@ def get_conversation(conversation_id):
     try:
         include_messages = request.args.get('include_messages', 'false').lower() == 'true'
         message_limit = int(request.args.get('message_limit', 50))
-        
-        conversation = storage.get_conversation(conversation_id)
-        
+
+        # Get user_id from query params
+        user_id = request.args.get('userId') or request.args.get('user_id')
+
+        if not user_id:
+            # Try to extract user_id from conversation_id if it has the format user_id_platform
+            if '_' in conversation_id:
+                user_id = conversation_id.split('_')[0]
+            else:
+                return jsonify({'error': 'userId parameter is required'}), 400
+
+        conversation = storage.get_conversation(conversation_id, user_id)
+
         if not conversation:
             return jsonify({'error': 'Conversation not found'}), 404
-        
-        # Format conversation
+
+        # conversation is a dict from Cosmos DB, access it as a dict
+        metrics = conversation.get('metrics', {})
+
+        # Format conversation response
         response = {
-            'conversation_id': conversation.conversation_id,
-            'partner_name': conversation.partner_name,
-            'category': conversation.category,
-            'relationship_health': conversation.get_relationship_health(),
+            'conversation_id': conversation.get('conversationId') or conversation.get('conversation_id') or conversation.get('id'),
+            'partner_name': conversation.get('partnerName') or conversation.get('partner_name', 'Unknown'),
+            'category': conversation.get('category', 'friends'),
+            'relationship_health': conversation.get('status', 'healthy'),  # Already calculated in to_dict
             'metrics': {
-                'total_messages': conversation.metrics.total_messages,
-                'user_messages': conversation.metrics.user_messages,
-                'partner_messages': conversation.metrics.partner_messages,
-                'reciprocity': round(conversation.metrics.reciprocity, 2),
-                'days_since_contact': conversation.metrics.days_since_contact,
-                'avg_response_time': round(conversation.metrics.avg_response_time, 2) if conversation.metrics.avg_response_time else None,
-                'common_topics': conversation.metrics.common_topics
+                'total_messages': metrics.get('total_messages', 0),
+                'user_messages': metrics.get('user_messages', 0),
+                'partner_messages': metrics.get('partner_messages', 0),
+                'reciprocity': round(metrics.get('reciprocity', 0.5), 2),
+                'days_since_contact': metrics.get('days_since_contact', 0),
+                'avg_response_time': round(metrics.get('avg_response_time', 0), 2) if metrics.get('avg_response_time') else None,
+                'common_topics': metrics.get('common_topics', [])
             },
-            'last_message_time': conversation.metrics.last_message_time.isoformat() if conversation.metrics.last_message_time else None,
-            'created_at': conversation.created_at.isoformat(),
-            'updated_at': conversation.updated_at.isoformat()
+            'last_message_time': metrics.get('last_message_time'),  # Already ISO string from to_dict
+            'created_at': conversation.get('createdAt') or conversation.get('created_at'),
+            'updated_at': conversation.get('updatedAt') or conversation.get('updated_at')
         }
-        
-        # Include messages if requested
+
+        # Include messages if requested (but we don't store messages in cloud for privacy)
         if include_messages:
-            recent_messages = conversation.get_last_n_messages(message_limit)
-            response['messages'] = [
-                {
-                    'timestamp': msg.timestamp.isoformat(),
-                    'sender': msg.sender,
-                    'content': msg.content
-                }
-                for msg in reversed(recent_messages)  # Chronological order
-            ]
-        
+            response['messages'] = []  # Messages stay local only
+
         return jsonify(response), 200
     
     except ValueError:
@@ -257,9 +273,19 @@ def generate_new_prompts(conversation_id):
         num_prompts = data.get('num_prompts', 3)
         # Allow override, but default to conversation-specific tone
         tone_override = data.get('tone')
-        
+
+        # Get user_id from request body or query params
+        user_id = data.get('userId') or data.get('user_id') or request.args.get('userId') or request.args.get('user_id')
+
+        if not user_id:
+            # Try to extract user_id from conversation_id if it has the format user_id_platform
+            if '_' in conversation_id:
+                user_id = conversation_id.split('_')[0]
+            else:
+                return jsonify({'error': 'userId parameter is required'}), 400
+
         # Get conversation
-        conversation = storage.get_conversation(conversation_id)
+        conversation = storage.get_conversation(conversation_id, user_id)
         
         if not conversation:
             return jsonify({'error': 'Conversation not found'}), 404
@@ -351,11 +377,9 @@ def generate_new_prompts(conversation_id):
                             if content:  # Only include messages with text for AI analysis
                                 messages_for_ai.append(Message(
                                     message_id=msg.get('guid', ''),
-                                    conversation_id=conversation_id,
-                                    sender=sender,
-                                    content=content,
                                     timestamp=msg_time,
-                                    platform='imessage'
+                                    sender=sender,
+                                    content=content
                                 ))
                         except Exception as e:
                             current_app.logger.warning(f"Error converting message for AI: {str(e)}")
@@ -415,11 +439,16 @@ def generate_new_prompts(conversation_id):
                 'confidence': round(prompt.confidence_score, 2)
             })
         
-        return jsonify({
-            'conversation_id': conversation_id,
-            'prompts_generated': len(saved_prompts),
-            'prompts': saved_prompts
-        }), 201
+        response_data = {
+            'success': True,
+            'data': {
+                'conversation_id': conversation_id,
+                'prompts_generated': len(saved_prompts),
+                'prompts': saved_prompts
+            }
+        }
+        current_app.logger.info(f"Returning {len(saved_prompts)} prompts in response: {[p['text'][:30] for p in saved_prompts]}")
+        return jsonify(response_data), 201
     
     except Exception as e:
         current_app.logger.error(f"Error generating new prompts: {str(e)}", exc_info=True)

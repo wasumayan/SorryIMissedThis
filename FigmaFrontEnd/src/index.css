@@ -2966,3 +2966,21 @@ html {
     opacity: .5;
   }
 }
+
+/* Fix scrolling in flex containers */
+.flex-1:has(> .overflow-y-auto) {
+  min-height: 0;
+}
+
+/* Ensure overflow-y-auto actually scrolls */
+.overflow-y-auto {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Fix for mobile Safari */
+@supports (-webkit-touch-callout: none) {
+  .overflow-y-auto {
+    -webkit-overflow-scrolling: touch;
+    overflow-y: scroll;
+  }
+}

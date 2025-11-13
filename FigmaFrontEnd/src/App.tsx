@@ -140,7 +140,7 @@ export default function App() {
 
   // Main App Views
   return (
-    <div className="h-screen flex flex-col overflow-hidden">
+    <div className="h-screen flex flex-col">
       {/* Top Navigation */}
       {currentView === "grove" && (
         <div className="border-b bg-card/50 backdrop-blur-sm px-6 py-3 flex items-center justify-between">
@@ -165,8 +165,8 @@ export default function App() {
         </div>
       )}
 
-      {/* Main Content */}
-      <div className="flex-1 overflow-hidden">
+  {/* Main Content */}
+  <div className="flex-1 min-h-0">
         {currentView === "grove" && user && (
           <GroveDashboard
             user={user}

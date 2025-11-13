@@ -4,7 +4,6 @@ import { Card } from "./ui/card";
 import { Switch } from "./ui/switch";
 import { Label } from "./ui/label";
 import { Input } from "./ui/input";
-import { ScrollArea } from "./ui/scroll-area";
 import { Separator } from "./ui/separator";
 import { Badge } from "./ui/badge";
 import { Progress } from "./ui/progress";
@@ -162,8 +161,8 @@ export function Settings({
         </div>
       </div>
 
-      <div className="flex-1 overflow-hidden">
-        <ScrollArea className="h-full">
+      <div className="flex-1 overflow-hidden min-h-0">
+        <div className="h-full overflow-y-auto">
           <div className="max-w-4xl mx-auto p-6 space-y-6">
           {/* Privacy Center */}
           <Card className="p-6 border-2 border-primary/20 shadow-lg">
@@ -589,7 +588,7 @@ export function Settings({
             </div>
           </Card>
           </div>
-        </ScrollArea>
+        </div>
       </div>
     </div>
   );
