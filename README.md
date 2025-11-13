@@ -245,18 +245,6 @@ SorryIMissedThis/
 - Input validation and sanitization
 - Secure secret management with Azure Key Vault
 
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📝 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
 ## 🙏 Acknowledgments
 
 - Design inspiration from nature and relationship psychology
@@ -264,11 +252,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Icons from Lucide React
 - AI capabilities powered by OpenAI
 
-## 📞 Support
-
-For support, email support@simt.app or join our Discord community.
-
 ---
 
 **Made with ❤️ by Wasu Industries**
-
