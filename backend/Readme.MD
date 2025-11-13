@@ -244,7 +244,3 @@ flake8 .
 # Type checking
 mypy .
 ```
-
-## License
-
-[Your License Here] 
