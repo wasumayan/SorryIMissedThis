@@ -6,12 +6,15 @@ import { ConversationView } from "./components/ConversationView";
 import { Analytics } from "./components/Analytics";
 import { Settings } from "./components/Settings";
 import { Schedule } from "./components/Schedule";
+import { StudyEnrollment } from "./components/StudyEnrollment";
+import { StudyStatusBanner } from "./components/StudyStatusBanner";
+import { PostConditionSurvey } from "./components/PostConditionSurvey";
 import { Button } from "./components/ui/button";
 import { Settings as SettingsIcon, Moon, Sun } from "lucide-react";
-import { apiClient, User, Contact } from "./services/api";
+import { apiClient, User, Contact, StudyParticipant, StudyStatus } from "./services/api";
 import { Toaster } from "./components/ui/sonner";
 
-type View = "onboarding" | "grove" | "conversation" | "analytics" | "settings" | "schedule";
+type View = "onboarding" | "study-enrollment" | "study-survey" | "grove" | "conversation" | "analytics" | "settings" | "schedule";
 
 export default function App() {
   const [currentView, setCurrentView] = useState<View>("onboarding");
@@ -20,6 +23,10 @@ export default function App() {
   const [season, setSeason] = useState<"spring" | "summer" | "autumn" | "winter">("summer");
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Study state
+  const [studyStatus, setStudyStatus] = useState<StudyStatus | null>(null);
+  const [showStudyBanner, setShowStudyBanner] = useState(true);
 
   // Check for existing authentication
   useEffect(() => {
@@ -105,9 +112,59 @@ export default function App() {
     }
   }, [darkMode]);
 
+  // Check study status when user is set
+  useEffect(() => {
+    const checkStudyStatus = async () => {
+      if (!user) return;
+
+      try {
+        const response = await apiClient.getStudyStatus(user.id);
+        if (response.success && response.data) {
+          const status = response.data;
+          setStudyStatus(status);
+
+          // If user needs to complete survey, redirect to survey
+          if (status.needsSurvey && status.participant) {
+            setCurrentView("study-survey");
+          }
+        }
+      } catch (error) {
+        console.error("Failed to check study status:", error);
+      }
+    };
+
+    checkStudyStatus();
+  }, [user]);
+
   const handleOnboardingComplete = (userData?: User) => {
     if (userData) {
       setUser(userData);
+      // After onboarding, offer study enrollment
+      setCurrentView("study-enrollment");
+    }
+  };
+
+  const handleStudyEnrolled = (participant: StudyParticipant) => {
+    setStudyStatus({
+      enrolled: true,
+      participant,
+      needsSurvey: false
+    });
+    setCurrentView("grove");
+  };
+
+  const handleSkipStudy = () => {
+    setCurrentView("grove");
+  };
+
+  const handleSurveyComplete = async () => {
+    // Refresh study status
+    if (user) {
+      const response = await apiClient.getStudyStatus(user.id);
+      if (response.success && response.data) {
+        const status = response.data;
+        setStudyStatus(status);
+      }
     }
     setCurrentView("grove");
   };
@@ -139,11 +196,50 @@ export default function App() {
     return <Onboarding onComplete={handleOnboardingComplete} />;
   }
 
+  // Study Enrollment Flow
+  if (currentView === "study-enrollment" && user) {
+    return (
+      <>
+        <Toaster richColors position="top-right" />
+        <StudyEnrollment
+          userId={user.id}
+          onEnrolled={handleStudyEnrolled}
+          onSkip={handleSkipStudy}
+        />
+      </>
+    );
+  }
+
+  // Study Survey Flow
+  if (currentView === "study-survey" && user && studyStatus?.participant) {
+    return (
+      <>
+        <Toaster richColors position="top-right" />
+        <PostConditionSurvey
+          userId={user.id}
+          condition={studyStatus.participant.currentCondition}
+          onComplete={handleSurveyComplete}
+          onCancel={() => setCurrentView("grove")}
+        />
+      </>
+    );
+  }
+
   // Main App Views
   return (
     <>
       <Toaster richColors position="top-right" />
       <div className="h-screen flex flex-col">
+      {/* Study Status Banner */}
+      {studyStatus?.enrolled && studyStatus.participant && showStudyBanner && (
+        <StudyStatusBanner
+          participant={studyStatus.participant}
+          needsSurvey={studyStatus.needsSurvey}
+          onTakeSurvey={() => setCurrentView("study-survey")}
+          onDismiss={() => setShowStudyBanner(false)}
+        />
+      )}
+
       {/* Top Navigation */}
       {currentView === "grove" && (
         <div className="border-b bg-card/50 backdrop-blur-sm px-6 py-3 flex items-center justify-between">

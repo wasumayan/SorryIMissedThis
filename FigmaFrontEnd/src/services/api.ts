@@ -573,12 +573,12 @@ class ApiClient {
       mode: chatTracking.mode,
       maxChats: chatTracking.maxChats,
     };
-    
+
     // Use selectedChatIds if provided, otherwise fall back to selectedChatGuids
     if (chatTracking.selectedChatGuids && chatTracking.selectedChatGuids.length > 0) {
       payload.selectedChatIds = chatTracking.selectedChatGuids;
     }
-    
+
     return this.request<{
       success: boolean;
       message: string;
@@ -589,6 +589,64 @@ class ApiClient {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
+  }
+
+  // Study endpoints for 3-condition research experiment
+  async enrollInStudy(userId: string) {
+    return this.request<{
+      success: boolean;
+      data: {
+        participant: StudyParticipant;
+        message: string;
+      };
+    }>('/study/enroll', {
+      method: 'POST',
+      body: JSON.stringify({ userId }),
+    });
+  }
+
+  async getStudyStatus(userId: string) {
+    return this.request<StudyStatus>(`/study/status?userId=${encodeURIComponent(userId)}`);
+  }
+
+  async advanceStudyCondition(userId: string) {
+    return this.request<{
+      success: boolean;
+      data: {
+        participant: StudyParticipant;
+        message: string;
+      };
+    }>('/study/advance-condition', {
+      method: 'POST',
+      body: JSON.stringify({ userId }),
+    });
+  }
+
+  async submitSurvey(surveyData: Omit<SurveyResponse, 'completedAt'> & { responses: Record<string, any> }) {
+    return this.request<{
+      success: boolean;
+      data: {
+        message: string;
+        canAdvance: boolean;
+      };
+    }>('/study/survey', {
+      method: 'POST',
+      body: JSON.stringify(surveyData),
+    });
+  }
+
+  async logStudyMetric(metricData: StudyMetricEvent) {
+    return this.request<{
+      success: boolean;
+    }>('/study/metrics/log', {
+      method: 'POST',
+      body: JSON.stringify(metricData),
+    });
+  }
+
+  async exportStudyMetrics(userId?: string) {
+    const params = userId ? `?userId=${encodeURIComponent(userId)}` : '';
+    return this.request<string>(`/study/metrics/export${params}`);
   }
 }
 
@@ -949,6 +1007,57 @@ export interface CalendarEvent {
     status: string;
   };
   priority: 'high' | 'medium' | 'low';
+}
+
+// Study types for 3-condition research experiment
+export type StudyCondition = 'no_prompt' | 'generic_prompt' | 'context_aware';
+
+export interface StudyParticipant {
+  userId: string;
+  participantId: string;
+  enrolledDate: string;
+  conditionOrder: StudyCondition[];
+  currentConditionIndex: number;
+  studyStartDate: string;
+  studyEndDate: string;
+  completedConditions: StudyCondition[];
+  isStudyComplete: boolean;
+  currentCondition: StudyCondition;
+  currentConditionStart: string;
+  currentConditionEnd: string;
+  daysInCurrentCondition: number;
+}
+
+export interface SurveyResponse {
+  userId: string;
+  condition: StudyCondition;
+  completedAt: string;
+  perceivedConnectedness: number; // 1-5
+  authenticity: number; // 1-5
+  enjoyment: number; // 1-5
+  easeOfConversation: number; // 1-5
+  promptHelpfulness?: number; // 1-5, conditional
+  promptRelevance?: number; // 1-5, conditional
+  editReasons?: string;
+  overallQualityVsTypical: number; // 1-5
+  communicationFrequency: string;
+  overallSatisfaction: number; // 1-5
+  likes?: string;
+  difficulties?: string;
+  suggestions?: string;
+}
+
+export interface StudyMetricEvent {
+  userId: string;
+  action: 'message_sent' | 'prompt_shown' | 'prompt_accepted' | 'prompt_edited' | 'prompt_dismissed';
+  data?: Record<string, unknown>;
+}
+
+export interface StudyStatus {
+  enrolled: boolean;
+  participant?: StudyParticipant;
+  needsSurvey?: boolean;
+  message?: string;
 }
 
 // Create and export the API client instance

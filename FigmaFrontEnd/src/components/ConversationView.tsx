@@ -12,7 +12,10 @@ import {
   Info,
   Send,
   CheckCircle,
-  Loader2
+  Loader2,
+  X,
+  RefreshCw,
+  Edit3
 } from "lucide-react";
 import { apiClient } from "../services/api";
 import { localMessageStorage } from "../services/localStorage";
@@ -57,6 +60,9 @@ export function ConversationView({ contactName, contactId, conversationId, userI
   const [reciprocity, setReciprocity] = useState<number>(0.5);
   const [isLoading, setIsLoading] = useState(true);
   const [conversationData, setConversationData] = useState<any>(null);
+  const [isRegenerating, setIsRegenerating] = useState(false);
+  const [dismissedPrompts, setDismissedPrompts] = useState<Set<number>>(new Set());
+  const [isEditing, setIsEditing] = useState(false);
 
   // Fetch conversation data, messages, and prompts
   useEffect(() => {
@@ -154,12 +160,88 @@ export function ConversationView({ contactName, contactId, conversationId, userI
           confidence: p.confidence
         }));
         setPrompts(newPrompts);
+        setDismissedPrompts(new Set()); // Reset dismissed prompts
         if (newPrompts.length > 0) {
           setCustomPrompt(newPrompts[0].text);
+          setSelectedPrompt(0);
+        }
+
+        // Log prompts shown for study metrics
+        if (userId && newPrompts.length > 0) {
+          for (const prompt of newPrompts) {
+            apiClient.logStudyMetric({
+              userId,
+              action: 'prompt_shown',
+              data: {
+                promptId: prompt.id,
+                conversationId: convId,
+                promptType: prompt.type,
+                promptText: prompt.text
+              }
+            }).catch(err => console.error('Failed to log prompt_shown metric:', err));
+          }
         }
       }
     } catch (error) {
       console.error('Error generating prompts:', error);
+      toast.error('Failed to generate prompts', {
+        description: 'Please try again later.',
+      });
+    }
+  };
+
+  const handleDismissPrompt = (index: number) => {
+    const newDismissed = new Set(dismissedPrompts);
+    newDismissed.add(index);
+    setDismissedPrompts(newDismissed);
+
+    // Log dismiss action for study metrics
+    if (userId) {
+      apiClient.logStudyMetric({
+        userId,
+        action: 'prompt_dismissed',
+        data: {
+          promptId: prompts[index].id,
+          promptText: prompts[index].text,
+          conversationId: conversationId || contactId,
+          timestamp: new Date().toISOString()
+        }
+      }).catch(err => console.error('Failed to log prompt_dismissed metric:', err));
+    }
+
+    toast.info('Prompt dismissed', {
+      description: 'This prompt will not be shown again.',
+    });
+
+    // Auto-select next non-dismissed prompt
+    const remainingPrompts = prompts.filter((_, i) => !newDismissed.has(i));
+    if (remainingPrompts.length > 0) {
+      const nextIndex = prompts.findIndex((_, i) => !newDismissed.has(i));
+      if (nextIndex !== -1) {
+        setSelectedPrompt(nextIndex);
+        setCustomPrompt(prompts[nextIndex].text);
+      }
+    }
+  };
+
+  const handleRegeneratePrompts = async () => {
+    setIsRegenerating(true);
+    toast.info('Regenerating prompts...', {
+      description: 'Creating new suggestions based on your conversation.',
+    });
+
+    try {
+      await generateNewPrompts(conversationId || contactId || '');
+      toast.success('New prompts generated!', {
+        description: 'Fresh suggestions are ready.',
+      });
+    } catch (error) {
+      console.error('Error regenerating prompts:', error);
+      toast.error('Failed to regenerate', {
+        description: 'Please try again.',
+      });
+    } finally {
+      setIsRegenerating(false);
     }
   };
 
@@ -247,6 +329,46 @@ export function ConversationView({ contactName, contactId, conversationId, userI
         toast.success('Message sent!', {
           description: 'Your message has been sent via iMessage.',
         });
+
+        // Log study metrics for message sent
+        if (userId) {
+          // Log message sent
+          apiClient.logStudyMetric({
+            userId,
+            action: 'message_sent',
+            data: {
+              conversationId: conversationId || contactId,
+              messageLength: messageToSend.length,
+              wasEdited,
+              editDistance: wasEdited ? Math.abs(messageToSend.length - originalPrompt.text.length) : 0
+            }
+          }).catch(err => console.error('Failed to log message_sent metric:', err));
+
+          // Log prompt accepted or edited
+          if (wasEdited) {
+            apiClient.logStudyMetric({
+              userId,
+              action: 'prompt_edited',
+              data: {
+                promptId: originalPrompt.id || originalPrompt.prompt_id,
+                conversationId: conversationId || contactId,
+                originalText: originalPrompt.text,
+                editedText: messageToSend,
+                editDistance: Math.abs(messageToSend.length - originalPrompt.text.length)
+              }
+            }).catch(err => console.error('Failed to log prompt_edited metric:', err));
+          } else {
+            apiClient.logStudyMetric({
+              userId,
+              action: 'prompt_accepted',
+              data: {
+                promptId: originalPrompt.id || originalPrompt.prompt_id,
+                conversationId: conversationId || contactId
+              }
+            }).catch(err => console.error('Failed to log prompt_accepted metric:', err));
+          }
+        }
+
         setTimeout(() => {
           onBack();
         }, 2000);
@@ -385,45 +507,98 @@ export function ConversationView({ contactName, contactId, conversationId, userI
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                 <label>Suggested Prompts</label>
-                  {prompts.length === 0 && !isLoading && (
-                    <Button
-                      variant="default"
-                      size="sm"
-                      onClick={() => generateNewPrompts(conversationId || contactId || '')}
-                      className="bg-primary hover:bg-primary/90 text-primary-foreground"
-                    >
-                      <Sparkles className="w-3 h-3 mr-1" />
-                      Generate
-                    </Button>
-                  )}
+                  <div className="flex gap-2">
+                    {prompts.length > 0 && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleRegeneratePrompts}
+                        disabled={isRegenerating}
+                        className="gap-1"
+                      >
+                        {isRegenerating ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <RefreshCw className="w-3 h-3" />
+                        )}
+                        Regenerate
+                      </Button>
+                    )}
+                    {prompts.length === 0 && !isLoading && (
+                      <Button
+                        variant="default"
+                        size="sm"
+                        onClick={() => generateNewPrompts(conversationId || contactId || '')}
+                        className="bg-primary hover:bg-primary/90 text-primary-foreground"
+                      >
+                        <Sparkles className="w-3 h-3 mr-1" />
+                        Generate
+                      </Button>
+                    )}
+                  </div>
                 </div>
                 {isLoading && prompts.length === 0 ? (
                   <div className="flex items-center justify-center py-8">
                     <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : prompts.filter((_, i) => !dismissedPrompts.has(i)).length === 0 && prompts.length > 0 ? (
+                  <div className="text-center py-8 text-muted-foreground text-sm space-y-3">
+                    <p>All prompts dismissed.</p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleRegeneratePrompts}
+                      disabled={isRegenerating}
+                      className="gap-1"
+                    >
+                      {isRegenerating ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <RefreshCw className="w-3 h-3" />
+                      )}
+                      Generate New Prompts
+                    </Button>
                   </div>
                 ) : prompts.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground text-sm">
                     <p>No prompts available. Click "Generate" to create AI prompts.</p>
                   </div>
                 ) : (
-                  prompts.map((prompt, index) => (
+                  prompts.map((prompt, index) =>
+                    !dismissedPrompts.has(index) && (
                   <Card
                     key={index}
-                    className={`p-4 cursor-pointer transition-all border-2 ${
+                    className={`cursor-pointer transition-all border-2 relative group ${
                       selectedPrompt === index
                         ? "border-primary bg-gradient-to-br from-primary/10 to-primary/5 shadow-lg"
                         : "border-transparent hover:border-primary/30 hover:shadow-md"
                     }`}
-                    onClick={() => {
-                      setSelectedPrompt(index);
-                      setCustomPrompt(prompt.text);
-                    }}
                   >
-                    <p style={{ fontSize: '0.9375rem' }}>{prompt.text}</p>
-                    <div className="flex items-center gap-2 mt-3 text-muted-foreground">
-                      <Info className="w-3 h-3" />
-                      <span style={{ fontSize: '0.75rem' }}>{prompt.reason}</span>
+                    <div
+                      className="p-4 pr-12"
+                      onClick={() => {
+                        setSelectedPrompt(index);
+                        setCustomPrompt(prompt.text);
+                      }}
+                    >
+                      <p style={{ fontSize: '0.9375rem' }}>{prompt.text}</p>
+                      <div className="flex items-center gap-2 mt-3 text-muted-foreground">
+                        <Info className="w-3 h-3" />
+                        <span style={{ fontSize: '0.75rem' }}>{prompt.reason}</span>
+                      </div>
                     </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="absolute top-2 right-2 h-8 w-8 p-0 opacity-60 hover:opacity-100 transition-opacity"
+                      onClick={(e: React.MouseEvent) => {
+                        e.stopPropagation();
+                        handleDismissPrompt(index);
+                      }}
+                      aria-label="Dismiss prompt"
+                    >
+                      <X className="w-4 h-4 text-muted-foreground hover:text-destructive transition-colors" />
+                    </Button>
                   </Card>
                   ))
                 )}
@@ -432,25 +607,51 @@ export function ConversationView({ contactName, contactId, conversationId, userI
               {/* Custom Edit */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                <label>Edit Your Message</label>
+                <label className="flex items-center gap-2">
+                    Edit Your Message
+                    {customPrompt && prompts[selectedPrompt] && customPrompt.trim() !== prompts[selectedPrompt].text.trim() && (
+                      <Edit3 className="w-3 h-3 text-primary" />
+                    )}
+                  </label>
                   {customPrompt && prompts[selectedPrompt] && customPrompt.trim() !== prompts[selectedPrompt].text.trim() && (
-                    <Badge variant="outline" className="text-xs">
-                      Edited
+                    <Badge variant="default" className="text-xs bg-primary/20 text-primary border-primary/30">
+                      Customized
                     </Badge>
                   )}
                 </div>
                 <Textarea
                   value={customPrompt || (prompts[selectedPrompt]?.text || '')}
-                  onChange={(e) => setCustomPrompt(e.target.value)}
+                  onChange={(e) => {
+                    setCustomPrompt(e.target.value);
+                    setIsEditing(true);
+                  }}
+                  onFocus={() => setIsEditing(true)}
+                  onBlur={() => setIsEditing(false)}
                   rows={4}
                   placeholder="Click a prompt above, then edit it here to customize your message..."
-                  className="resize-none"
+                  className={`resize-none transition-all ${
+                    customPrompt && prompts[selectedPrompt] && customPrompt.trim() !== prompts[selectedPrompt].text.trim()
+                      ? 'border-primary/50 ring-1 ring-primary/20'
+                      : ''
+                  }`}
                 />
-                <p className="text-xs text-muted-foreground">
-                  {customPrompt && prompts[selectedPrompt] && customPrompt.trim() !== prompts[selectedPrompt].text.trim()
-                    ? "✓ Your message has been customized"
-                    : "You can edit the selected prompt above to personalize it"}
-                </p>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-muted-foreground flex items-center gap-1">
+                    {customPrompt && prompts[selectedPrompt] && customPrompt.trim() !== prompts[selectedPrompt].text.trim()
+                      ? "✓ Your message has been customized"
+                      : "You can edit the selected prompt above to personalize it"}
+                  </p>
+                  {customPrompt && prompts[selectedPrompt] && customPrompt.trim() !== prompts[selectedPrompt].text.trim() && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 text-xs"
+                      onClick={() => setCustomPrompt(prompts[selectedPrompt].text)}
+                    >
+                      Reset
+                    </Button>
+                  )}
+                </div>
               </div>
 
               {/* Tone Dial */}

@@ -24,6 +24,10 @@ class AzureStorageService:
 
     def __init__(self):
         """Initialize Cosmos DB connection"""
+        # Default to non-mock; _initialize_cosmos_db will flip this to True if
+        # credentials are missing or initialization fails.
+        self.mock_mode = False
+
         if not self._initialized:
             self._initialize_cosmos_db()
             AzureStorageService._initialized = True
@@ -35,6 +39,8 @@ class AzureStorageService:
             cosmos_endpoint = os.getenv('COSMOS_ENDPOINT')
             cosmos_key = os.getenv('COSMOS_KEY')
             database_name = os.getenv('COSMOS_DATABASE', 'sorryimissedthis')
+            # store chosen database name for later use (study methods expect this)
+            self.database_name = database_name
 
             if not cosmos_endpoint or not cosmos_key:
                 print("WARNING: Cosmos DB credentials not configured")
@@ -42,6 +48,10 @@ class AzureStorageService:
                 print("Running in mock mode - data will not be persisted")
                 self.client = None
                 self.database = None
+                # Mark mock mode explicitly so callers can use in-memory fallbacks
+                self.mock_mode = True
+                # ensure database_client attribute exists for code paths that use it
+                self.database_client = None
                 return
 
             # Initialize Cosmos DB client
@@ -53,6 +63,13 @@ class AzureStorageService:
             # Create containers (collections)
             self._initialize_containers()
 
+            # Provide database_client alias used elsewhere in the code
+            # (CosmosClient provides get_database_client)
+            self.database_client = self.client
+
+            # Successfully initialized, ensure mock_mode is False
+            self.mock_mode = False
+
             print("Azure Cosmos DB connection established successfully")
             print(f"Database: {database_name}")
 
@@ -61,6 +78,9 @@ class AzureStorageService:
             print("Running in mock mode - data will not be persisted")
             self.client = None
             self.database = None
+            # mark mock mode so higher-level code uses in-memory fallbacks
+            self.mock_mode = True
+            self.database_client = None
 
     def _initialize_containers(self):
         """Create containers if they don't exist"""
@@ -100,6 +120,26 @@ class AzureStorageService:
                 id='scheduled_prompts',
                 partition_key=PartitionKey(path='/userId')
             )
+
+            # Study related containers (participants, survey responses, metrics)
+            # These are required by the study endpoints; create them if missing.
+            try:
+                self.study_participants_container = self.database.create_container_if_not_exists(
+                    id='study_participants',
+                    partition_key=PartitionKey(path='/userId')
+                )
+
+                self.survey_responses_container = self.database.create_container_if_not_exists(
+                    id='survey_responses',
+                    partition_key=PartitionKey(path='/userId')
+                )
+
+                self.study_metrics_container = self.database.create_container_if_not_exists(
+                    id='study_metrics',
+                    partition_key=PartitionKey(path='/userId')
+                )
+            except Exception as e:
+                print(f"Warning: could not create study containers: {str(e)}")
 
             print("Cosmos DB containers initialized")
 
@@ -861,6 +901,130 @@ class AzureStorageService:
         except Exception as e:
             print(f"Error deleting scheduled prompt: {str(e)}")
             return False
+
+    # ===== Study Management Methods =====
+
+    def get_study_participant_count(self):
+        """Get total number of study participants (for counterbalancing)"""
+        if self.mock_mode:
+            return len(getattr(self, '_study_participants', {}))
+
+        try:
+            query = "SELECT VALUE COUNT(1) FROM c"
+            result = list(self.database_client.get_database_client(self.database_name)
+                         .get_container_client('study_participants')
+                         .query_items(query=query, enable_cross_partition_query=True))
+            return result[0] if result else 0
+        except:
+            return 0
+
+    def save_study_participant(self, participant):
+        """Save or update study participant"""
+        if self.mock_mode:
+            if not hasattr(self, '_study_participants'):
+                self._study_participants = {}
+            self._study_participants[participant.user_id] = participant.to_dict()
+            return True
+
+        try:
+            container = self.database_client.get_database_client(self.database_name).get_container_client('study_participants')
+            participant_dict = participant.to_dict()
+            participant_dict['id'] = participant.user_id
+            container.upsert_item(participant_dict)
+            return True
+        except Exception as e:
+            print(f"Error saving study participant: {str(e)}")
+            return False
+
+    def get_study_participant(self, user_id):
+        """Get study participant by user ID"""
+        if self.mock_mode:
+            if not hasattr(self, '_study_participants'):
+                self._study_participants = {}
+            return self._study_participants.get(user_id)
+
+        try:
+            container = self.database_client.get_database_client(self.database_name).get_container_client('study_participants')
+            item = container.read_item(item=user_id, partition_key=user_id)
+            return item
+        except:
+            return None
+
+    def save_survey_response(self, survey):
+        """Save post-condition survey response"""
+        if self.mock_mode:
+            if not hasattr(self, '_survey_responses'):
+                self._survey_responses = {}
+            key = f"{survey.user_id}_{survey.condition}"
+            self._survey_responses[key] = survey.to_dict()
+            return True
+
+        try:
+            container = self.database_client.get_database_client(self.database_name).get_container_client('survey_responses')
+            survey_dict = survey.to_dict()
+            survey_dict['id'] = f"{survey.user_id}_{survey.condition}"
+            survey_dict['userId'] = survey.user_id  # Add partition key
+            container.upsert_item(survey_dict)
+            return True
+        except Exception as e:
+            print(f"Error saving survey response: {str(e)}")
+            return False
+
+    def get_survey_response(self, user_id, condition):
+        """Get survey response for a user and condition"""
+        if self.mock_mode:
+            if not hasattr(self, '_survey_responses'):
+                self._survey_responses = {}
+            key = f"{user_id}_{condition}"
+            return self._survey_responses.get(key)
+
+        try:
+            container = self.database_client.get_database_client(self.database_name).get_container_client('survey_responses')
+            item_id = f"{user_id}_{condition}"
+            item = container.read_item(item=item_id, partition_key=user_id)
+            return item
+        except:
+            return None
+
+    def log_study_metric(self, metric_event):
+        """Log a study metric event"""
+        if self.mock_mode:
+            if not hasattr(self, '_study_metrics'):
+                self._study_metrics = []
+            self._study_metrics.append(metric_event)
+            return True
+
+        try:
+            from datetime import datetime
+            container = self.database_client.get_database_client(self.database_name).get_container_client('study_metrics')
+            metric_event['id'] = f"{metric_event['userId']}_{metric_event['timestamp']}_{metric_event['action']}"
+            container.create_item(metric_event)
+            return True
+        except Exception as e:
+            print(f"Error logging study metric: {str(e)}")
+            return False
+
+    def get_all_study_metrics(self, user_id=None):
+        """Get all study metrics, optionally filtered by user"""
+        if self.mock_mode:
+            if not hasattr(self, '_study_metrics'):
+                self._study_metrics = []
+            if user_id:
+                return [m for m in self._study_metrics if m.get('userId') == user_id]
+            return self._study_metrics
+
+        try:
+            container = self.database_client.get_database_client(self.database_name).get_container_client('study_metrics')
+            if user_id:
+                query = "SELECT * FROM c WHERE c.userId = @userId"
+                parameters = [{"name": "@userId", "value": user_id}]
+                return list(container.query_items(query=query, parameters=parameters, partition_key=user_id))
+            else:
+                query = "SELECT * FROM c"
+                return list(container.query_items(query=query, enable_cross_partition_query=True))
+        except Exception as e:
+            print(f"Error getting study metrics: {str(e)}")
+            return []
 
 
 # Create a singleton instance
