@@ -4,10 +4,11 @@ import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Textarea } from "./ui/textarea";
 import { Slider } from "./ui/slider";
-import { 
-  ArrowLeft, 
-  MessageCircle, 
-  Sparkles, 
+import { ScrollArea } from "./ui/scroll-area";
+import {
+  ArrowLeft,
+  MessageCircle,
+  Sparkles,
   Info,
   Send,
   CheckCircle,
@@ -15,6 +16,7 @@ import {
 } from "lucide-react";
 import { apiClient } from "../services/api";
 import { localMessageStorage } from "../services/localStorage";
+import { toast } from "sonner";
 
 interface Message {
   id: string;
@@ -196,30 +198,38 @@ export function ConversationView({ contactName, contactId, conversationId, userI
 
   const handleSendMessage = async () => {
     if (!conversationId && !contactId) {
-      alert('Cannot send message: conversation ID not available');
+      toast.error('Cannot send message', {
+        description: 'Conversation ID not available. Please try syncing conversations first.',
+      });
       return;
     }
 
     if (prompts.length === 0 || !prompts[selectedPrompt]) {
-      alert('No prompts available. Please generate prompts first.');
+      toast.error('No prompts available', {
+        description: 'Please generate prompts first using the button above.',
+      });
       return;
     }
 
     const originalPrompt = prompts[selectedPrompt];
     if (!originalPrompt || !originalPrompt.text) {
-      alert('Invalid prompt selected. Please select a valid prompt.');
+      toast.error('Invalid prompt', {
+        description: 'Please select a valid prompt from the list.',
+      });
       return;
     }
 
     const messageToSend = customPrompt || originalPrompt.text;
     if (!messageToSend.trim()) {
-      alert('Please enter a message');
+      toast.error('Empty message', {
+        description: 'Please enter a message to send.',
+      });
       return;
     }
 
     // Determine if message was edited
     const wasEdited = customPrompt.trim() !== '' && customPrompt.trim() !== originalPrompt.text.trim();
-    
+
     setSending(true);
     try {
       const { apiClient } = await import('../services/api');
@@ -231,19 +241,26 @@ export function ConversationView({ contactName, contactId, conversationId, userI
         originalPrompt.text, // originalPromptText
         wasEdited // wasEdited
       );
-      
+
       if (result.success) {
-    setSent(true);
-    setTimeout(() => {
-      onBack();
-    }, 2000);
+        setSent(true);
+        toast.success('Message sent!', {
+          description: 'Your message has been sent via iMessage.',
+        });
+        setTimeout(() => {
+          onBack();
+        }, 2000);
       } else {
-        alert('Failed to send message: ' + (result.error || 'Unknown error'));
+        toast.error('Failed to send message', {
+          description: result.error || 'Unknown error occurred. Please try again.',
+        });
         setSending(false);
       }
     } catch (error) {
       console.error('Error sending message:', error);
-      alert('Error sending message. Please try again.');
+      toast.error('Error sending message', {
+        description: 'Please check your connection and try again.',
+      });
       setSending(false);
     }
   };
@@ -269,9 +286,11 @@ export function ConversationView({ contactName, contactId, conversationId, userI
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col lg:flex-row overflow-visible min-h-0">
-  {/* Left: Conversation Thread */}
-  <div className="flex-1 lg:flex-[1] flex flex-col lg:border-r overflow-visible min-h-0">
+      {/* Main content area - using explicit height */}
+      <div className="flex-1 overflow-hidden">
+        <ScrollArea className="h-full">
+        {/* Left: Conversation Thread */}
+        <div className="flex-1 lg:flex-[1] flex flex-col lg:border-r overflow-hidden min-h-0">
           {/* AI Summary */}
           {conversationSummary && (
           <div className="bg-gradient-to-r from-primary/10 via-accent/10 to-secondary/20 border-b p-4 shrink-0">
@@ -309,10 +328,8 @@ export function ConversationView({ contactName, contactId, conversationId, userI
             </div>
           )}
 
-          {/* Messages - using native div with overflow for reliable scrolling */}
-          <div 
-            className="flex-1 p-4 sm:p-6 scrollable"
-          >
+          {/* Messages - scrollable area */}
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6">
             <div className="space-y-4 max-w-3xl">
               {isLoading ? (
                 <div className="flex items-center justify-center py-12">
@@ -352,8 +369,8 @@ export function ConversationView({ contactName, contactId, conversationId, userI
           </div>
         </div>
 
-  {/* Right: Prompt Composer */}
-  <div className="w-full lg:w-[480px] flex flex-col bg-card/30 lg:border-t-0 border-t overflow-visible min-h-0">
+        {/* Right: Prompt Composer */}
+        <div className="w-full lg:w-[480px] flex flex-col bg-card/30 lg:border-t-0 border-t overflow-hidden min-h-0">
           <div className="border-b p-4 flex-shrink-0">
             <h3>Compose Message</h3>
             <p className="text-muted-foreground mt-1" style={{ fontSize: '0.875rem' }}>
@@ -361,9 +378,8 @@ export function ConversationView({ contactName, contactId, conversationId, userI
             </p>
           </div>
 
-          <div 
-            className="flex-1 p-4 sm:p-6 scrollable"
-          >
+          {/* Prompts - scrollable area */}
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6">
             <div className="space-y-6">
               {/* Suggested Prompts */}
               <div className="space-y-3">
@@ -523,7 +539,10 @@ export function ConversationView({ contactName, contactId, conversationId, userI
             )}
           </div>
         </div>
+        </ScrollArea>
       </div>
+
     </div>
+
   );
 }

@@ -9,6 +9,7 @@ import { Schedule } from "./components/Schedule";
 import { Button } from "./components/ui/button";
 import { Settings as SettingsIcon, Moon, Sun } from "lucide-react";
 import { apiClient, User, Contact } from "./services/api";
+import { Toaster } from "./components/ui/sonner";
 
 type View = "onboarding" | "grove" | "conversation" | "analytics" | "settings" | "schedule";
 
@@ -25,9 +26,9 @@ export default function App() {
     const checkAuth = async () => {
       try {
         // 🧪 TESTING MODE: Always force onboarding during development
-        // TODO: Remove this hardcoded flag before production
-        const FORCE_ONBOARDING_FOR_TESTING = true; // Set to false to restore normal auth flow
-        
+        // Set to true to force onboarding flow for testing
+        const FORCE_ONBOARDING_FOR_TESTING = false; // Changed to false for production use
+
         if (FORCE_ONBOARDING_FOR_TESTING) {
           console.log('[DEBUG] 🧪 TESTING MODE: Force onboarding enabled - clearing localStorage');
           localStorage.removeItem('simt_token');
@@ -140,7 +141,9 @@ export default function App() {
 
   // Main App Views
   return (
-    <div className="h-screen flex flex-col">
+    <>
+      <Toaster richColors position="top-right" />
+      <div className="h-screen flex flex-col">
       {/* Top Navigation */}
       {currentView === "grove" && (
         <div className="border-b bg-card/50 backdrop-blur-sm px-6 py-3 flex items-center justify-between">
@@ -204,5 +207,6 @@ export default function App() {
         )}
       </div>
     </div>
+    </>
   );
 }

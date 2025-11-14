@@ -3,6 +3,7 @@ import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { ArrowLeft, TrendingUp, Users, MessageSquare, Heart } from "lucide-react";
 import { apiClient, User, AnalyticsOverview, TrendsData } from "../services/api";
+import { ScrollArea } from "./ui/scroll-area";
 
 interface AnalyticsProps {
   user: User;
@@ -60,9 +61,10 @@ export function Analytics({ user, onBack }: AnalyticsProps) {
           </p>
         </div>
       </div>
+      <ScrollArea className="h-full">
 
       <div className="flex-1 overflow-hidden min-h-0">
-        <div className="h-full overflow-y-auto">
+        <div className="h-full overflow-y-auto scrollable">
           <div className="max-w-6xl mx-auto p-6 space-y-6">
           {/* Stats Cards */}
           {isLoading ? (
@@ -314,6 +316,7 @@ export function Analytics({ user, onBack }: AnalyticsProps) {
         </div>
         </div>
       </div>
+      </ScrollArea>
     </div>
   );
 }

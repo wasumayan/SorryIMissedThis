@@ -91,7 +91,7 @@ export function RelationshipStatsModal({
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4">
         {/* Backdrop */}
         <motion.div
           initial={{ opacity: 0 }}
@@ -107,12 +107,12 @@ export function RelationshipStatsModal({
           animate={{ scale: 1, opacity: 1, y: 0 }}
           exit={{ scale: 0.9, opacity: 0, y: 20 }}
           transition={{ type: "spring", duration: 0.5 }}
-          className="relative w-full max-w-2xl"
+          className="relative w-full max-w-2xl max-h-[90vh] flex flex-col"
         >
-          <Card className="overflow-hidden bg-card/95 backdrop-blur-xl shadow-2xl">
+          <Card className="overflow-hidden bg-card/95 backdrop-blur-xl shadow-2xl flex flex-col max-h-full">
             {/* Header with plant illustration */}
-            <div 
-              className="relative p-6 pb-20"
+            <div
+              className="relative p-4 sm:p-6 pb-16 sm:pb-20 flex-shrink-0"
               style={{
                 background: `linear-gradient(135deg, ${statusColor}15 0%, ${statusColor}05 100%)`,
               }}

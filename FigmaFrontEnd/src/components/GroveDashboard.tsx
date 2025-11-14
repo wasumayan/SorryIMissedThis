@@ -8,6 +8,7 @@ import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
 import { Droplet, Search, Calendar, TrendingUp, RefreshCw } from "lucide-react";
 import { apiClient, User, Contact, DailySuggestion } from "../services/api";
+import { toast } from "sonner";
 
 interface GroveDashboardProps {
   user: User;
@@ -106,7 +107,7 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
   // - Line thickness: frequency (avg messages/day in past 50 days) - thicker = more frequent
   const layoutContacts = (contacts: Contact[]) => {
     const centerX = 500;
-    const centerY = 350;
+    const centerY = 200;
     const totalContacts = contacts.length;
     
     if (totalContacts === 0) return [];
@@ -147,15 +148,15 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
 
     return contacts.map((contact, i) => {
       // Angle: evenly distributed (360 / total)
-      const angleDegrees = (360 / totalContacts) * i;
+      const angleDegrees = (-180 / totalContacts) * i;
       const angleRadians = (angleDegrees * Math.PI) / 180;
 
       // Line length: recency (normalized 0-1, where 0 = recent, 1 = old)
       // Recent contacts (low recency) = shorter lines (closer to center)
       // Old contacts (high recency) = longer lines (farther from center)
       const recencyNormalized = normalizedRecencies[i];
-      const minDistance = 80;   // Closest (recent contacts)
-      const maxDistance = 300;   // Farthest (old contacts)
+      const minDistance = 150;   // Closest (recent contacts)
+      const maxDistance = 200;   // Farthest (old contacts)
       const distance = minDistance + recencyNormalized * (maxDistance - minDistance);
 
       // Calculate position
@@ -165,7 +166,7 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
       // Line thickness: frequency (normalized 0-1)
       // High frequency = thick line, low frequency = thin line
       const frequencyNormalized = normalizedFrequencies[i];
-      const minThickness = 1;
+      const minThickness = 2;
       const maxThickness = 8;
       const lineThickness = minThickness + frequencyNormalized * (maxThickness - minThickness);
 
@@ -271,29 +272,36 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
     try {
       console.log('[GROVE] Syncing iMessage conversations...');
       const syncResponse = await apiClient.synciMessage(user.id);
-      
+
       if (syncResponse.success) {
         console.log('[GROVE] Sync successful:', syncResponse.data);
-        
+
         // Refresh contacts and suggestions after sync
         const contactsResponse = await apiClient.getContacts(user.id);
         if (contactsResponse.success && contactsResponse.data) {
           setContacts(contactsResponse.data.contacts);
         }
-        
+
         const suggestionsResponse = await apiClient.getDailySuggestions(user.id);
         if (suggestionsResponse.success && suggestionsResponse.data) {
           setSuggestions(suggestionsResponse.data.suggestions);
         }
-        
-        alert(`Successfully synced ${syncResponse.data?.data?.conversations_synced || 0} conversations!`);
+
+        const conversationCount = syncResponse.data?.data?.conversations_synced || 0;
+        toast.success(`Successfully synced ${conversationCount} conversation${conversationCount !== 1 ? 's' : ''}!`, {
+          description: 'Your grove has been updated with the latest data.',
+        });
       } else {
         console.error('[GROVE] Sync failed:', syncResponse.error);
-        alert(`Sync failed: ${syncResponse.error || 'Unknown error'}`);
+        toast.error('Sync failed', {
+          description: syncResponse.error || 'Unknown error occurred. Please try again.',
+        });
       }
     } catch (error) {
       console.error('[GROVE] Error syncing:', error);
-      alert('Error syncing conversations. Please try again.');
+      toast.error('Error syncing conversations', {
+        description: 'Please check your connection and try again.',
+      });
     } finally {
       setIsSyncing(false);
     }
@@ -348,7 +356,8 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
           </div>
 
           {/* Grove Canvas */}
-          <div className="flex-1 relative overflow-hidden">
+          <div className="flex-1 relative">
+            <div className="absolute inset-0 overflow-hidden">
             {/* Subtle background pattern */}
             <div className="absolute inset-0 opacity-[0.03]">
               <svg width="100%" height="100%">
@@ -372,6 +381,7 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
                 size="icon"
                 onClick={() => setZoomLevel(Math.min(zoomLevel + 0.1, 2))}
                 className="h-8 w-8"
+                aria-label="Zoom in"
               >
                 +
               </Button>
@@ -383,6 +393,7 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
                 size="icon"
                 onClick={() => setZoomLevel(Math.max(zoomLevel - 0.1, 0.5))}
                 className="h-8 w-8"
+                aria-label="Zoom out"
               >
                 −
               </Button>
@@ -396,16 +407,18 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
                 }}
                 className="h-8 w-8 text-xs"
                 title="Reset zoom"
+                aria-label="Reset zoom to 100%"
               >
                 ⌂
               </Button>
             </div>
 
-            <svg 
-              className="w-full h-full cursor-move" 
-              style={{ minHeight: '700px' }}
-              viewBox={`${0 - panX} ${0 - panY} ${1000 / zoomLevel} ${700 / zoomLevel}`}
+            <svg
+              className="w-full h-full cursor-move"
+              viewBox={`${0 - panX} ${0 - panY} ${1000 / zoomLevel} ${800 / zoomLevel}`}
               preserveAspectRatio="xMidYMid meet"
+              role="img"
+              aria-label="Interactive relationship grove visualization showing your contacts"
               onMouseDown={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect();
                 setIsDragging(true);
@@ -439,10 +452,10 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
               </defs>
               
               {/* Glow effect */}
-              <circle cx="500" cy="350" r="60" fill="url(#water-glow)" />
-              
+              <circle cx="500" cy="400" r="60" fill="url(#water-glow)" />
+
               {/* Watering can illustration */}
-              <g transform="translate(500, 350)">
+              <g transform="translate(500, 400)">
                 {/* Can body */}
                 <ellipse
                   cx="0"
@@ -509,31 +522,80 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
               </g>
               
               {/* "You" label */}
-              <text 
-                x="500" 
-                y="405" 
-                textAnchor="middle" 
-                fill="currentColor" 
-                fontSize="13" 
+              <text
+                x="500"
+                y="455"
+                textAnchor="middle"
+                fill="currentColor"
+                fontSize="13"
                 fontWeight="600"
                 opacity="0.8"
               >
                 You
               </text>
 
+              {/* Loading state */}
+              {isLoading && (
+                <g>
+                  <text
+                    x="500"
+                    y="320"
+                    textAnchor="middle"
+                    fill="currentColor"
+                    fontSize="16"
+                    fontWeight="500"
+                    opacity="0.6"
+                  >
+                    Loading your grove...
+                  </text>
+                  <circle
+                    cx="500"
+                    cy="350"
+                    r="20"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="3"
+                    strokeDasharray="100"
+                    strokeLinecap="round"
+                    opacity="0.4"
+                  >
+                    <animateTransform
+                      attributeName="transform"
+                      type="rotate"
+                      from="0 500 350"
+                      to="360 500 350"
+                      dur="1.5s"
+                      repeatCount="indefinite"
+                    />
+                  </circle>
+                </g>
+              )}
+
               {/* Empty state message */}
               {contacts.length === 0 && !isLoading && (
-                <text
-                  x="500"
-                  y="280"
-                  textAnchor="middle"
-                  fill="currentColor"
-                  fontSize="16"
-                  fontWeight="500"
-                  opacity="0.6"
-                >
-                  Sync iMessage to grow your grove
-                </text>
+                <g>
+                  <text
+                    x="500"
+                    y="310"
+                    textAnchor="middle"
+                    fill="currentColor"
+                    fontSize="18"
+                    fontWeight="600"
+                    opacity="0.7"
+                  >
+                    Your grove is waiting to grow
+                  </text>
+                  <text
+                    x="500"
+                    y="340"
+                    textAnchor="middle"
+                    fill="currentColor"
+                    fontSize="14"
+                    opacity="0.5"
+                  >
+                    Click "Sync Conversations" to get started
+                  </text>
+                </g>
               )}
 
               {/* Branch + Leaf pairs - render together to ensure 1:1 correspondence */}
@@ -546,12 +608,12 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
                 const opacity = 0.4 + frequencyNormalized * 0.5; // 0.4-0.9 range
                 
                 return (
-                  <g key={contact.id || contact.guid || `contact-${contact.name}-${contact.x}-${contact.y}`}>
+                  <g key={contact.id || `contact-${contact.name}-${contact.x}-${contact.y}`}>
                     {/* Branch line from "You" (center) to this contact's leaf */}
                     {/* Line length = recency (distance), Line thickness = frequency */}
                     <line
                       x1="500"
-                      y1="350"
+                      y1="400"
                       x2={contact.x}
                       y2={contact.y}
                       stroke="#78350f"
@@ -578,10 +640,11 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
                 );
               })}
             </svg>
+            </div>
 
             {/* Enhanced Legend */}
-            <div className="absolute bottom-6 left-6">
-              <Card className="p-4 space-y-3 bg-card/90 backdrop-blur-md shadow-xl">
+            <div className="absolute bottom-6 left-6 z-20 pointer-events-none">
+              <Card className="w-52 p-4 space-y-2 bg-card backdrop-blur-md shadow-xl border-2 pointer-events-auto">
                 <p className="text-muted-foreground" style={{ fontSize: '0.75rem', marginBottom: '4px' }}>
                   Relationship Health
                 </p>
