@@ -32,6 +32,7 @@ interface SettingsProps {
   onToggleDarkMode: () => void;
   season?: "spring" | "summer" | "autumn" | "winter";
   onSeasonChange?: (season: "spring" | "summer" | "autumn" | "winter") => void;
+  onPurgeComplete?: () => void; // Callback to redirect to onboarding
 }
 
 export function Settings({
@@ -40,12 +41,15 @@ export function Settings({
   darkMode,
   onToggleDarkMode,
   season = "summer",
-  onSeasonChange
+  onSeasonChange,
+  onPurgeComplete
 }: SettingsProps) {
   const [localOnly, setLocalOnly] = useState(true);
   const [reducedMotion, setReducedMotion] = useState(false);
   const [dailyDigest, setDailyDigest] = useState(true);
   const [weeklyReflection, setWeeklyReflection] = useState(true);
+  const [isPurging, setIsPurging] = useState(false);
+  const [showPurgeConfirm, setShowPurgeConfirm] = useState(false);
   
   // Chat tracking preferences
   const [chatTrackingMode, setChatTrackingMode] = useState<'all' | 'recent' | 'selected'>(
@@ -100,6 +104,37 @@ export function Settings({
     } catch (error) {
       console.error('Error saving chat tracking preferences:', error);
       setSavingChatTracking(false);
+    }
+  };
+
+  const handlePurgeData = async () => {
+    if (!showPurgeConfirm) {
+      setShowPurgeConfirm(true);
+      return;
+    }
+
+    setIsPurging(true);
+    try {
+      const response = await apiClient.purgeAllData();
+
+      if (response.success) {
+        // Clear local storage
+        localStorage.clear();
+
+        // Call onPurgeComplete to redirect to onboarding
+        if (onPurgeComplete) {
+          onPurgeComplete();
+        }
+      } else {
+        alert('Failed to purge data: ' + (response.error || 'Unknown error'));
+        setIsPurging(false);
+        setShowPurgeConfirm(false);
+      }
+    } catch (error) {
+      console.error('Error purging data:', error);
+      alert('An error occurred while purging data. Please try again.');
+      setIsPurging(false);
+      setShowPurgeConfirm(false);
     }
   };
 
@@ -219,14 +254,54 @@ export function Settings({
                     <div className="flex-1">
                       <h4>Purge All Data</h4>
                       <p className="text-muted-foreground mt-1" style={{ fontSize: '0.875rem' }}>
-                        Permanently delete all messages, contacts, and analysis from this device.
-                        This action cannot be undone.
+                        Permanently delete all messages, contacts, study data, and your account.
+                        This action cannot be undone and will return you to the onboarding screen.
                       </p>
                     </div>
                   </div>
-                  <Button variant="destructive" className="w-full">
-                    Purge All Data
-                  </Button>
+                  {showPurgeConfirm && (
+                    <div className="bg-destructive/10 border border-destructive/20 rounded p-3">
+                      <p className="text-sm font-semibold text-destructive mb-2">
+                        ⚠️ Are you absolutely sure?
+                      </p>
+                      <p className="text-xs text-muted-foreground mb-3">
+                        This will permanently delete:
+                      </p>
+                      <ul className="text-xs text-muted-foreground space-y-1 mb-3 ml-4 list-disc">
+                        <li>All your conversations and messages</li>
+                        <li>All contacts and relationship data</li>
+                        <li>Your study enrollment and progress</li>
+                        <li>Your user account</li>
+                      </ul>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="destructive"
+                          onClick={handlePurgeData}
+                          disabled={isPurging}
+                          className="flex-1"
+                        >
+                          {isPurging ? 'Purging...' : 'Yes, Delete Everything'}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={() => setShowPurgeConfirm(false)}
+                          disabled={isPurging}
+                          className="flex-1"
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                  {!showPurgeConfirm && (
+                    <Button
+                      variant="destructive"
+                      className="w-full"
+                      onClick={handlePurgeData}
+                    >
+                      Purge All Data
+                    </Button>
+                  )}
                 </div>
               </div>
             </div>

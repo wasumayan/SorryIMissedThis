@@ -136,6 +136,16 @@ class ApiClient {
     this.clearToken();
   }
 
+  async purgeAllData() {
+    const response = await this.request<{ success: boolean; message: string }>('/auth/purge', {
+      method: 'POST'
+    });
+    if (response.success) {
+      this.clearToken();
+    }
+    return response;
+  }
+
   async getCurrentUser() {
     return this.request<User>('/auth/me');
   }

@@ -299,6 +299,15 @@ export default function App() {
             onBack={handleBackToGrove}
             darkMode={darkMode}
             onToggleDarkMode={() => setDarkMode(!darkMode)}
+            onPurgeComplete={() => {
+              // Clear all state
+              setUser(null);
+              setStudyStatus(null);
+              setSelectedContact(null);
+              setShowStudyBanner(true);
+              // Redirect to onboarding
+              setCurrentView("onboarding");
+            }}
           />
         )}
       </div>
