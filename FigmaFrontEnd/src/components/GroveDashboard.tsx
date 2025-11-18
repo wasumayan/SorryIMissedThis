@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { AnimatePresence } from "motion/react";
-import { GroveLeaf } from "./GroveLeaf";
+import { GroveSVG } from "./GroveSVG";
 import { RelationshipStatsModal } from "./RelationshipStatsModal";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
@@ -9,6 +9,7 @@ import { Input } from "./ui/input";
 import { Droplet, Search, Calendar, TrendingUp, RefreshCw } from "lucide-react";
 import { apiClient, User, Contact, DailySuggestion } from "../services/api";
 import { toast } from "sonner";
+import { GROVE_CONSTANTS } from "../constants/grove";
 
 interface GroveDashboardProps {
   user: User;
@@ -24,12 +25,32 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [suggestions, setSuggestions] = useState<DailySuggestion[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [zoomLevel, setZoomLevel] = useState(1);
-  const [panX, setPanX] = useState(0);
-  const [panY, setPanY] = useState(0);
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [isSyncing, setIsSyncing] = useState(false);
+  const graphContainerRef = useRef<HTMLDivElement>(null);
+  const [graphDimensions, setGraphDimensions] = useState({ width: 1000, height: 800 });
+
+  // Update graph dimensions only when container size changes
+  useEffect(() => {
+    if (!graphContainerRef.current) return;
+
+    const updateDimensions = () => {
+      if (graphContainerRef.current) {
+        const rect = graphContainerRef.current.getBoundingClientRect();
+        setGraphDimensions({ width: rect.width, height: rect.height });
+      }
+    };
+
+    // Initial size
+    updateDimensions();
+
+    // Update on window resize
+    const resizeObserver = new ResizeObserver(updateDimensions);
+    resizeObserver.observe(graphContainerRef.current);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
 
   // Fetch contacts and suggestions on mount
   useEffect(() => {
@@ -86,7 +107,7 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
     fetchData();
   }, [user.id]);
 
-  const filters = ["All", "Family", "Friends", "Work", "Dormant", "Priority"];
+  const filters = [...GROVE_CONSTANTS.FILTERS];
 
   // OPTIMIZATION: Use useMemo to avoid recalculating filtered contacts on every render
   const filteredContacts = useMemo(() => {
@@ -101,117 +122,9 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
     });
   }, [contacts, searchQuery, activeFilter]);
 
-  // Simple graph layout: User at center, radial distribution
-  // - Angle: 360 / total contacts (evenly spaced)
-  // - Line length: recency (days since contact) - longer = older
-  // - Line thickness: frequency (avg messages/day in past 50 days) - thicker = more frequent
-  const layoutContacts = (contacts: Contact[]) => {
-    const centerX = 500;
-    const centerY = 200;
-    const totalContacts = contacts.length;
-    
-    if (totalContacts === 0) return [];
-
-    // Use normalized values from backend, or normalize here if not provided
-    // Backend sends: recency (0-1, where 0=recent, 1=old), frequency (0-1, where 0=low, 1=high)
-    const recencies = contacts.map(c => {
-      // If recency is provided (normalized), use it directly
-      // Otherwise, calculate from daysSinceContact
-      if (c.recency !== undefined) return c.recency;
-      if (c.daysSinceContact !== undefined) return Math.min(1.0, c.daysSinceContact / 90.0);
-      return 0.5; // Default
-    });
-    
-    const frequencies = contacts.map(c => {
-      // If frequency is provided (normalized), use it directly
-      // Otherwise, normalize from interactionFrequency
-      if (c.frequency !== undefined) return c.frequency;
-      if (c.metrics?.interactionFrequency !== undefined) {
-        return Math.min(1.0, c.metrics.interactionFrequency / 5.0); // 5 msg/day = max
-      }
-      return 0; // Default
-    });
-    
-    // If backend didn't normalize, normalize here across all contacts
-    const maxRecency = Math.max(...recencies, 1);
-    const maxFrequency = Math.max(...frequencies, 1);
-    
-    const normalizedRecencies = contacts.map((c, i) => {
-      // Use backend normalized value if available, otherwise normalize here
-      return c.recency !== undefined ? c.recency : (recencies[i] / maxRecency);
-    });
-    
-    const normalizedFrequencies = contacts.map((c, i) => {
-      // Use backend normalized value if available, otherwise normalize here
-      return c.frequency !== undefined ? c.frequency : (frequencies[i] / maxFrequency);
-    });
-
-    return contacts.map((contact, i) => {
-      // Angle: evenly distributed (360 / total)
-      const angleDegrees = (-180 / totalContacts) * i;
-      const angleRadians = (angleDegrees * Math.PI) / 180;
-
-      // Line length: recency (normalized 0-1, where 0 = recent, 1 = old)
-      // Recent contacts (low recency) = shorter lines (closer to center)
-      // Old contacts (high recency) = longer lines (farther from center)
-      const recencyNormalized = normalizedRecencies[i];
-      const minDistance = 150;   // Closest (recent contacts)
-      const maxDistance = 200;   // Farthest (old contacts)
-      const distance = minDistance + recencyNormalized * (maxDistance - minDistance);
-
-      // Calculate position
-      const x = centerX + Math.cos(angleRadians) * distance;
-      const y = centerY + Math.sin(angleRadians) * distance;
-
-      // Line thickness: frequency (normalized 0-1)
-      // High frequency = thick line, low frequency = thin line
-      const frequencyNormalized = normalizedFrequencies[i];
-      const minThickness = 2;
-      const maxThickness = 8;
-      const lineThickness = minThickness + frequencyNormalized * (maxThickness - minThickness);
-
-      return {
-        ...contact,
-        x,
-        y,
-        rotation: angleDegrees + 90, // Leaf rotation (perpendicular to branch)
-        branchLength: distance,
-        lineThickness, // For rendering the branch line
-        recencyNormalized,
-        frequencyNormalized,
-      };
-    });
-  };
-
-  const layoutedContacts = layoutContacts(filteredContacts);
-  
-  // Debug logging
-  console.log('[GROVE] Render state:', {
-    totalContacts: contacts.length,
-    filteredContacts: filteredContacts.length,
-    layoutedContacts: layoutedContacts.length,
-    isLoading,
-    activeFilter,
-    searchQuery,
-    sampleContact: layoutedContacts.length > 0 ? {
-      name: layoutedContacts[0].name,
-      x: layoutedContacts[0].x,
-      y: layoutedContacts[0].y,
-      recency: layoutedContacts[0].recency,
-      frequency: layoutedContacts[0].frequency,
-      lineThickness: layoutedContacts[0].lineThickness
-    } : null
-  });
+  // Graph data calculation moved to GroveSVG component
   
   const dormantCount = contacts.filter((c) => c.status === "dormant" || c.status === "wilted").length;
-  const attentionCount = contacts.filter((c) => c.status === "attention").length;
-
-  const handleLeafClick = (contact: Contact) => {
-    console.log('[GROVE] Leaf clicked:', contact.name, contact.id);
-    console.log('[GROVE] Contact data:', contact);
-    setSelectedContact(contact);
-    console.log('[GROVE] Selected contact set to:', contact);
-  };
 
   const handleCloseModal = () => {
     setSelectedContact(null);
@@ -224,48 +137,29 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
     }
   };
 
-  // Handle mouse wheel / trackpad zoom
-  // Zooms towards the mouse cursor position (standard behavior)
-  const handleWheel = (e: React.WheelEvent<SVGSVGElement>) => {
-    // Prevent page scroll when zooming
-    e.preventDefault();
+  const handleLeafClick = useCallback((contact: Contact) => {
+    console.log('[GROVE] Leaf clicked:', contact.name, contact.id);
+    console.log('[GROVE] Contact data:', contact);
+    // Directly navigate to conversation view
+    onContactSelect(contact);
+  }, [onContactSelect]);
+
+  // Rendering functions moved to GroveSVG component (pure SVG with D3.js)
+
+  // Update graph dimensions on resize
+  useEffect(() => {
+    const updateDimensions = () => {
+      const container = document.querySelector('.grove-container');
+      if (container) {
+        const rect = container.getBoundingClientRect();
+        setGraphDimensions({ width: rect.width, height: rect.height });
+      }
+    };
     
-    // Get zoom direction and sensitivity
-    // deltaY: negative = zoom in (scroll up), positive = zoom out (scroll down)
-    // Use smaller increments for smoother zooming
-    const zoomSensitivity = 0.05; // Adjust this for faster/slower zoom
-    const zoomDelta = e.deltaY > 0 ? -zoomSensitivity : zoomSensitivity;
-    
-    // Calculate new zoom level (clamp between 0.5 and 2)
-    const newZoom = Math.max(0.5, Math.min(2, zoomLevel + zoomDelta));
-    
-    // If zoom didn't change (hit limit), don't update pan
-    if (newZoom === zoomLevel) return;
-    
-    // Get mouse position relative to SVG viewport
-    const svg = e.currentTarget;
-    const rect = svg.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-    
-    // Convert mouse position to SVG coordinates
-    const viewBoxWidth = 1000 / zoomLevel;
-    const viewBoxHeight = 700 / zoomLevel;
-    const svgX = (-panX) + (mouseX / rect.width) * viewBoxWidth;
-    const svgY = (-panY) + (mouseY / rect.height) * viewBoxHeight;
-    
-    // Calculate new viewBox dimensions
-    const newViewBoxWidth = 1000 / newZoom;
-    const newViewBoxHeight = 700 / newZoom;
-    
-    // Adjust pan to keep the point under cursor in the same position
-    const newPanX = -svgX + (mouseX / rect.width) * newViewBoxWidth;
-    const newPanY = -svgY + (mouseY / rect.height) * newViewBoxHeight;
-    
-    setZoomLevel(newZoom);
-    setPanX(newPanX);
-    setPanY(newPanY);
-  };
+    updateDimensions();
+    window.addEventListener('resize', updateDimensions);
+    return () => window.removeEventListener('resize', updateDimensions);
+  }, []);
 
   const handleSyncConversations = async () => {
     setIsSyncing(true);
@@ -356,10 +250,10 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
           </div>
 
           {/* Grove Canvas */}
-          <div className="flex-1 relative">
+          <div className="flex-1 relative grove-container">
             <div className="absolute inset-0 overflow-hidden">
             {/* Subtle background pattern */}
-            <div className="absolute inset-0 opacity-[0.03]">
+            <div className="absolute inset-0 opacity-[0.03] z-0">
               <svg width="100%" height="100%">
                 <defs>
                   <pattern id="leaf-pattern" x="0" y="0" width="120" height="120" patternUnits="userSpaceOnUse">
@@ -374,272 +268,41 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
               </svg>
             </div>
 
-            {/* Zoom Controls */}
-            <div className="absolute top-4 right-4 z-10 flex flex-col gap-2 bg-card/90 backdrop-blur-sm rounded-lg p-2 border shadow-lg">
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={() => setZoomLevel(Math.min(zoomLevel + 0.1, 2))}
-                className="h-8 w-8"
-                aria-label="Zoom in"
-              >
-                +
-              </Button>
-              <div className="text-xs text-center text-muted-foreground px-2">
-                {Math.round(zoomLevel * 100)}%
+            {/* Loading state */}
+            {isLoading && (
+              <div className="absolute inset-0 flex items-center justify-center z-10">
+                <div className="text-center">
+                  <div className="text-lg font-medium opacity-60 mb-4">Loading your grove...</div>
+                  <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+                </div>
               </div>
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={() => setZoomLevel(Math.max(zoomLevel - 0.1, 0.5))}
-                className="h-8 w-8"
-                aria-label="Zoom out"
-              >
-                −
-              </Button>
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={() => {
-                  setZoomLevel(1);
-                  setPanX(0);
-                  setPanY(0);
-                }}
-                className="h-8 w-8 text-xs"
-                title="Reset zoom"
-                aria-label="Reset zoom to 100%"
-              >
-                ⌂
-              </Button>
-            </div>
-
-            <svg
-              className="w-full h-full cursor-move"
-              viewBox={`${0 - panX} ${0 - panY} ${1000 / zoomLevel} ${800 / zoomLevel}`}
-              preserveAspectRatio="xMidYMid meet"
-              role="img"
-              aria-label="Interactive relationship grove visualization showing your contacts"
-              onMouseDown={(e) => {
-                const rect = e.currentTarget.getBoundingClientRect();
-                setIsDragging(true);
-                setDragStart({ 
-                  x: e.clientX - panX * zoomLevel, 
-                  y: e.clientY - panY * zoomLevel 
-                });
-              }}
-              onMouseMove={(e) => {
-                if (isDragging) {
-                  const deltaX = (e.clientX - dragStart.x) / zoomLevel;
-                  const deltaY = (e.clientY - dragStart.y) / zoomLevel;
-                  setPanX(deltaX);
-                  setPanY(deltaY);
-                }
-              }}
-              onMouseUp={() => setIsDragging(false)}
-              onMouseLeave={() => setIsDragging(false)}
-              onWheel={handleWheel}
-            >
-              {/* Watering can (you) in the center */}
-              <defs>
-                <radialGradient id="water-glow">
-                  <stop offset="0%" stopColor="#06b6d4" stopOpacity="0.4" />
-                  <stop offset="100%" stopColor="#06b6d4" stopOpacity="0.1" />
-                </radialGradient>
-                <linearGradient id="water-gradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                  <stop offset="0%" stopColor="#67e8f9" />
-                  <stop offset="100%" stopColor="#06b6d4" />
-                </linearGradient>
-              </defs>
-              
-              {/* Glow effect */}
-              <circle cx="500" cy="400" r="60" fill="url(#water-glow)" />
-
-              {/* Watering can illustration */}
-              <g transform="translate(500, 400)">
-                {/* Can body */}
-                <ellipse
-                  cx="0"
-                  cy="5"
-                  rx="28"
-                  ry="30"
-                  fill="#78716c"
-                  opacity="0.9"
-                />
-                {/* Water inside (visible through can) */}
-                <ellipse
-                  cx="0"
-                  cy="10"
-                  rx="22"
-                  ry="20"
-                  fill="url(#water-gradient)"
-                  opacity="0.85"
-                />
-                {/* Water shimmer effect */}
-                <ellipse
-                  cx="-5"
-                  cy="5"
-                  rx="12"
-                  ry="8"
-                  fill="white"
-                  opacity="0.4"
-                />
-                
-                {/* Can rim/opening at top */}
-                <ellipse
-                  cx="0"
-                  cy="-23"
-                  rx="20"
-                  ry="6"
-                  fill="#57534e"
-                />
-                <ellipse
-                  cx="0"
-                  cy="-24"
-                  rx="20"
-                  ry="5"
-                  fill="#78716c"
-                />
-                
-                {/* Handle */}
-                <path
-                  d="M 28 0 Q 45 0 45 -15 Q 45 -25 35 -25"
-                  fill="none"
-                  stroke="#78716c"
-                  strokeWidth="4"
-                  strokeLinecap="round"
-                />
-                
-                {/* Spout */}
-                <path
-                  d="M -20 -10 L -40 -18 L -42 -12 L -22 -4 Z"
-                  fill="#78716c"
-                  opacity="0.9"
-                />
-                {/* Spout holes */}
-                <circle cx="-38" cy="-17" r="1.5" fill="#57534e" />
-                <circle cx="-40" cy="-14" r="1.5" fill="#57534e" />
-                <circle cx="-42" cy="-16" r="1.5" fill="#57534e" />
-              </g>
-              
-              {/* "You" label */}
-              <text
-                x="500"
-                y="455"
-                textAnchor="middle"
-                fill="currentColor"
-                fontSize="13"
-                fontWeight="600"
-                opacity="0.8"
-              >
-                You
-              </text>
-
-              {/* Loading state */}
-              {isLoading && (
-                <g>
-                  <text
-                    x="500"
-                    y="320"
-                    textAnchor="middle"
-                    fill="currentColor"
-                    fontSize="16"
-                    fontWeight="500"
-                    opacity="0.6"
-                  >
-                    Loading your grove...
-                  </text>
-                  <circle
-                    cx="500"
-                    cy="350"
-                    r="20"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="3"
-                    strokeDasharray="100"
-                    strokeLinecap="round"
-                    opacity="0.4"
-                  >
-                    <animateTransform
-                      attributeName="transform"
-                      type="rotate"
-                      from="0 500 350"
-                      to="360 500 350"
-                      dur="1.5s"
-                      repeatCount="indefinite"
-                    />
-                  </circle>
-                </g>
               )}
 
               {/* Empty state message */}
               {contacts.length === 0 && !isLoading && (
-                <g>
-                  <text
-                    x="500"
-                    y="310"
-                    textAnchor="middle"
-                    fill="currentColor"
-                    fontSize="18"
-                    fontWeight="600"
-                    opacity="0.7"
-                  >
-                    Your grove is waiting to grow
-                  </text>
-                  <text
-                    x="500"
-                    y="340"
-                    textAnchor="middle"
-                    fill="currentColor"
-                    fontSize="14"
-                    opacity="0.5"
-                  >
-                    Click "Sync Conversations" to get started
-                  </text>
-                </g>
-              )}
+              <div className="absolute inset-0 flex items-center justify-center z-10">
+                <div className="text-center">
+                  <div className="text-xl font-semibold opacity-70 mb-2">Your grove is waiting to grow</div>
+                  <div className="text-sm opacity-50">Click "Sync Conversations" to get started</div>
+                </div>
+              </div>
+            )}
 
-              {/* Branch + Leaf pairs - render together to ensure 1:1 correspondence */}
-              {layoutedContacts.map((contact) => {
-                // Use calculated values from layoutContacts
-                const lineThickness = contact.lineThickness || 2;
-                const frequencyNormalized = contact.frequencyNormalized || 0;
-                
-                // Opacity based on frequency (more active = more visible)
-                const opacity = 0.4 + frequencyNormalized * 0.5; // 0.4-0.9 range
-                
-                return (
-                  <g key={contact.id || `contact-${contact.name}-${contact.x}-${contact.y}`}>
-                    {/* Branch line from "You" (center) to this contact's leaf */}
-                    {/* Line length = recency (distance), Line thickness = frequency */}
-                    <line
-                      x1="500"
-                      y1="400"
-                      x2={contact.x}
-                      y2={contact.y}
-                      stroke="#78350f"
-                      strokeWidth={lineThickness / zoomLevel}
-                      opacity={opacity}
-                      strokeLinecap="round"
-                    />
-                    
-                    {/* Leaf at the end of the branch */}
-                    <GroveLeaf
-                      name={contact.name}
-                      category={contact.category}
-                      status={contact.status}
-                      size={contact.size}
-                      x={contact.x}
-                      y={contact.y}
-                      rotation={contact.rotation}
-                      onClick={() => {
-                        console.log('[GROVE] Leaf onClick triggered for:', contact.name);
-                        handleLeafClick(contact);
-                      }}
-                    />
-                  </g>
-                );
-              })}
-            </svg>
+            {/* Pure SVG Graph Visualization with D3.js - Everything synced */}
+            {!isLoading && filteredContacts.length > 0 && (
+              <div 
+                ref={graphContainerRef}
+                className="absolute inset-0 z-0"
+              >
+                <GroveSVG
+                  contacts={filteredContacts}
+                  onContactClick={handleLeafClick}
+                  width={graphDimensions.width}
+                  height={graphDimensions.height}
+                />
+              </div>
+            )}
+
             </div>
 
             {/* Enhanced Legend */}
@@ -650,20 +313,20 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
                 </p>
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-[#10b981]" />
-                    <span style={{ fontSize: '0.75rem' }}>Healthy - Thriving connection</span>
+                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: GROVE_CONSTANTS.COLORS.HEALTHY }} />
+                    <span className="text-xs">Healthy - Thriving connection</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-[#f59e0b]" />
-                    <span style={{ fontSize: '0.75rem' }}>Attention - Withering, needs care</span>
+                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: GROVE_CONSTANTS.COLORS.ATTENTION }} />
+                    <span className="text-xs">Attention - Withering, needs care</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-[#ec4899]" />
-                    <span style={{ fontSize: '0.75rem' }}>Dormant - Bud waiting to bloom</span>
+                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: GROVE_CONSTANTS.COLORS.DORMANT }} />
+                    <span className="text-xs">Dormant - Bud waiting to bloom</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-[#78350f]" />
-                    <span style={{ fontSize: '0.75rem' }}>At Risk - Needs urgent attention</span>
+                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: GROVE_CONSTANTS.COLORS.WILTED }} />
+                    <span className="text-xs">At Risk - Needs urgent attention</span>
                   </div>
                 </div>
                 <div className="pt-2 border-t text-muted-foreground" style={{ fontSize: '0.7rem' }}>
@@ -696,13 +359,13 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
                       <p className="text-muted-foreground text-sm">Loading suggestions...</p>
                     </Card>
                   ) : suggestions.length > 0 ? (
-                    suggestions.slice(0, 3).map((suggestion, index) => {
+                    suggestions.slice(0, GROVE_CONSTANTS.MAX_SUGGESTIONS_DISPLAYED).map((suggestion, index) => {
                       const priorityColors = {
-                        high: '#f59e0b',
-                        medium: '#06b6d4',
-                        low: '#10b981'
+                        high: GROVE_CONSTANTS.COLORS.PRIORITY_HIGH,
+                        medium: GROVE_CONSTANTS.COLORS.PRIORITY_MEDIUM,
+                        low: GROVE_CONSTANTS.COLORS.PRIORITY_LOW
                       };
-                      const color = priorityColors[suggestion.priority] || '#06b6d4';
+                      const color = priorityColors[suggestion.priority] || GROVE_CONSTANTS.COLORS.PRIORITY_MEDIUM;
 
                       return (
                         <Card
@@ -758,7 +421,7 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
                   <div className="space-y-2 mt-4">
                     {contacts
                       .filter((c) => c.status === "dormant" || c.status === "wilted")
-                      .slice(0, 3)
+                      .slice(0, GROVE_CONSTANTS.MAX_DORMANT_DISPLAYED)
                       .map((contact) => (
                         <Card
                           key={contact.id}
@@ -775,9 +438,11 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
                               />
                               <span style={{ fontSize: '0.875rem' }}>{contact.name}</span>
                             </div>
+                            {contact.lastContact && (
                             <Badge variant="outline" className="text-xs">
                               {contact.lastContact}
                             </Badge>
+                            )}
                           </div>
                         </Card>
                       ))}

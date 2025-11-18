@@ -20,13 +20,14 @@ class NameInferenceService:
         from app.services.ai_service import AIService
         self.ai_service = AIService()
 
-    def infer_name_from_messages(self, messages: List[Dict], phone_number: Optional[str] = None) -> Optional[str]:
+    def infer_name_from_messages(self, messages: List[Dict], phone_number: Optional[str] = None, user_names: Optional[List[str]] = None) -> Optional[str]:
         """
         Infer contact name from message history using AI
         
         Args:
             messages: List of message dictionaries with 'text', 'sender', 'isFromMe' fields
             phone_number: Optional phone number for context
+            user_names: Optional list of user's name variations to exclude
             
         Returns:
             Inferred name or None if not found
@@ -36,7 +37,8 @@ class NameInferenceService:
         
         try:
             # Use AI service to infer name (fail gracefully if API key is wrong)
-            inferred_name = self.ai_service.infer_contact_name(messages, phone_number)
+            # Pass user_names to prevent returning user's own name
+            inferred_name = self.ai_service.infer_contact_name(messages, phone_number, user_names)
             
             if inferred_name:
                 logger.info(f"AI inferred name: {inferred_name}")
@@ -92,7 +94,8 @@ class NameInferenceService:
         chat_id: str,
         display_name: Optional[str],
         messages: Optional[List[Dict]] = None,
-        phone_number: Optional[str] = None
+        phone_number: Optional[str] = None,
+        user_names: Optional[List[str]] = None
     ) -> str:
         """
         Get display name with inference fallback
@@ -111,10 +114,20 @@ class NameInferenceService:
         
         # Try to infer from messages using AI
         if messages:
-            inferred = self.infer_name_from_messages(messages, phone_number)
+            inferred = self.infer_name_from_messages(messages, phone_number, user_names)
             if inferred:
-                logger.info(f"AI inferred name '{inferred}' for chat {chat_id}")
-                return inferred
+                # If AI returned contact info (phone/email), try again with more messages
+                if self._is_just_contact_info(inferred):
+                    logger.info(f"AI returned contact info '{inferred}', trying with more context (last 50 messages)")
+                    # Try again with more messages for better context
+                    inferred = self.infer_name_from_messages(messages[-50:] if len(messages) > 50 else messages, phone_number, user_names)
+                    if inferred and not self._is_just_contact_info(inferred):
+                        logger.info(f"AI inferred name '{inferred}' for chat {chat_id} (with more context)")
+                        return inferred
+                    # If still contact info, don't use it - fall through to next tier
+                else:
+                    logger.info(f"AI inferred name '{inferred}' for chat {chat_id}")
+                    return inferred
         
         # Fallback: extract phone/email from chatId
         contact_info = self.extract_contact_info_from_chat_id(chat_id)

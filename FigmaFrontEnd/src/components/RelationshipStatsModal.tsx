@@ -4,18 +4,10 @@ import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Progress } from "./ui/progress";
+import { Contact as ApiContact } from "../services/api";
 
-interface Contact {
-  id: string;
-  name: string;
-  category: "family" | "friends" | "work";
-  status: "healthy" | "attention" | "dormant" | "wilted";
-  size: number;
-  lastContact: string;
-  messageCount?: number;
-  reciprocityScore?: number;
-  daysConnected?: number;
-}
+// Use the API Contact type instead of defining our own
+type Contact = ApiContact;
 
 interface RelationshipStatsModalProps {
   contact: Contact | null;
@@ -39,15 +31,16 @@ export function RelationshipStatsModal({
   
   console.log('[MODAL] Rendering modal for contact:', contact.name, contact.id);
 
-  // Use real contact data
+  // Use real contact data from API Contact type
   const stats = {
-    messageCount: contact.messageCount || contact.metrics?.totalMessages || 0,
-    reciprocityScore: Math.round((contact.reciprocityScore || contact.metrics?.reciprocity || 0.5) * 100),
-    daysConnected: contact.daysConnected || contact.metrics?.daysSinceContact || 0,
-    lastTopics: contact.metrics?.commonTopics || contact.aiAnalysis?.topics?.slice(0, 3).map((t: any) => t.topic || t) || [],
-    responseTime: contact.metrics?.avgResponseTime 
-      ? `Usually replies in ${Math.round(contact.metrics.avgResponseTime)} hours`
-      : "Response time data not available",
+    messageCount: contact.metrics?.totalMessages ?? 0,
+    reciprocityScore: Math.round((contact.metrics?.reciprocity ?? 0.5) * 100),
+    daysConnected: contact.daysSinceContact ?? 0,
+    lastContact: contact.lastContact,
+    lastTopics: contact.aiAnalysis?.preferredTopics ?? [],
+    responseTime: contact.metrics?.averageResponseTime 
+      ? `Usually replies in ${Math.round(contact.metrics.averageResponseTime)} hours`
+      : null,
     connectionStrength: contact.status === "healthy" ? "Strong" : 
                         contact.status === "attention" ? "Good" :
                         contact.status === "dormant" ? "Fading" : "Weak",
@@ -77,7 +70,8 @@ export function RelationshipStatsModal({
     ],
   };
 
-  const currentPrompts = contact.suggestedPrompts || defaultPrompts[contact.status] || [];
+  // API Contact doesn't have suggestedPrompts, use defaults
+  const currentPrompts = defaultPrompts[contact.status] || [];
   
   // Health-based colors instead of category colors
   const healthColors = {
@@ -214,13 +208,15 @@ export function RelationshipStatsModal({
               </div>
 
               {/* Response Pattern */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm text-muted-foreground">Response Pattern</span>
-                  <span className="text-sm">{stats.responseTime}</span>
+              {stats.responseTime && (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm text-muted-foreground">Response Pattern</span>
+                    <span className="text-sm">{stats.responseTime}</span>
+                  </div>
+                  <Progress value={stats.reciprocityScore} className="h-2" />
                 </div>
-                <Progress value={stats.reciprocityScore} className="h-2" />
-              </div>
+              )}
 
               {/* AI Prompts */}
               <div className="pt-4 border-t">

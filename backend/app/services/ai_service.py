@@ -28,19 +28,36 @@ class AIService:
             print(
                 "WARNING: OPENAI_API_KEY not set. Using fallback prompts.", flush=True)
 
-    def infer_contact_name(self, messages: List[Dict], phone_number: Optional[str] = None) -> Optional[str]:
+    def infer_contact_name(self, messages: List[Dict], phone_number: Optional[str] = None, user_names: Optional[List[str]] = None) -> Optional[str]:
         """
         Infer contact name from message history using AI
         
         Args:
             messages: List of message dictionaries with 'text', 'sender', 'isFromMe' fields
             phone_number: Optional phone number for context
+            user_names: Optional list of user's name variations to exclude (e.g., ["John", "John Doe", "Johnny"])
             
         Returns:
             Inferred name or None if not found
         """
         if not messages or not self.api_key:
             return None
+        
+        # Extract user's name from their own messages if not provided
+        if user_names is None:
+            user_names = []
+            # Get user's name from messages they sent (isFromMe=True)
+            user_messages = [msg for msg in messages if msg.get('isFromMe', False)]
+            for msg in user_messages:
+                sender_name = msg.get('senderName') or msg.get('sender')
+                if sender_name and sender_name not in user_names:
+                    # Extract name parts (first name, full name variations)
+                    name_parts = sender_name.split()
+                    if len(name_parts) > 0:
+                        user_names.append(name_parts[0])  # First name
+                    if len(name_parts) > 1:
+                        user_names.append(' '.join(name_parts))  # Full name
+                    user_names.append(sender_name)  # Original name
         
         # Filter to only messages from the contact (not from me)
         contact_messages = [
@@ -61,12 +78,20 @@ class AIService:
         # Prepare context for AI
         context = "\n".join([f"Message: {text}" for text in message_texts[-10:]])  # Last 10 messages
         
+        # Build exclusion list for prompt
+        exclusion_text = ""
+        if user_names:
+            unique_user_names = list(set([name.lower().strip() for name in user_names if name and len(name.strip()) > 0]))
+            if unique_user_names:
+                exclusion_text = f"\n\nIMPORTANT: Do NOT return any of these names (these are the user's own name): {', '.join(unique_user_names)}"
+        
         prompt = f"""Analyze the following messages from a contact and extract their name if mentioned.
 
 Messages:
 {context}
 
 {f"Phone number: {phone_number}" if phone_number else ""}
+{exclusion_text}
 
 Instructions:
 1. Look for the contact's name in introductions, signatures, or when they refer to themselves
@@ -74,6 +99,7 @@ Instructions:
 3. Return ONLY the name (first name or full name), nothing else
 4. If no name can be determined, return "null"
 5. Return a single name, not multiple names
+6. DO NOT return the user's own name or any variations of it{exclusion_text and ' (see exclusion list above)' or ''}
 
 Name:"""
 
@@ -91,9 +117,25 @@ Name:"""
                 name = name.strip('"\'')
                 # Take first line only
                 name = name.split('\n')[0].strip()
+                
                 # Validate it looks like a name
-                if len(name) >= 2 and len(name) <= 50 and name.replace(' ', '').replace('-', '').isalpha():
-                    return name
+                if len(name) < 2 or len(name) > 50 or not name.replace(' ', '').replace('-', '').isalpha():
+                    return None
+                
+                # SAFEGUARD: Check if inferred name matches user's name (case-insensitive)
+                if user_names:
+                    name_lower = name.lower().strip()
+                    for user_name in user_names:
+                        if user_name and name_lower == user_name.lower().strip():
+                            print(f"SAFEGUARD: Rejected inferred name '{name}' - matches user's name '{user_name}'", flush=True)
+                            return None
+                        # Also check if it's a partial match (e.g., "John" matches "John Doe")
+                        user_name_parts = user_name.lower().split()
+                        if len(user_name_parts) > 0 and name_lower == user_name_parts[0]:
+                            print(f"SAFEGUARD: Rejected inferred name '{name}' - matches user's first name '{user_name_parts[0]}'", flush=True)
+                            return None
+                
+                return name
         except Exception as e:
             print(f"Error inferring name with AI: {str(e)}", flush=True)
         
@@ -309,13 +351,22 @@ Name:"""
 
         context_parts.append("\nRecent conversation:")
 
-        # Add recent messages
+        # Add recent messages with proper labeling
         for msg in recent_messages:
             # Skip messages with no content
             if not msg.content:
                 continue
+            
+            # Properly label messages: "You:" for user messages, "Contact:" for contact messages
+            # Check if sender is 'user' or matches user_id (user's messages)
+            if msg.sender == 'user' or msg.sender == conversation.user_id or msg.sender.lower() == 'user':
+                sender_label = "You"
+            else:
+                # This is a message from the contact
+                sender_label = conversation.partner_name
+            
             # Limit message length
-            context_parts.append(f"{msg.sender}: {msg.content[:200]}")
+            context_parts.append(f"{sender_label}: {msg.content[:200]}")
 
         return "\n".join(context_parts)
 

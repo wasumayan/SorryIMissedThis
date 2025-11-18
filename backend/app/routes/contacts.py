@@ -106,25 +106,50 @@ def get_contacts():
             # Normalize: 0 msg/day = 0, 5+ msg/day = 1
             frequency_normalized = min(1.0, frequency_past_50_days / 5.0)
             
-            # Relationship health: combination of frequency and recency
-            # High frequency + recent = healthy
-            # Low frequency + old = dormant/wilted
-            # Medium = attention
-            if frequency_normalized > 0.5 and recency_normalized < 0.3:
-                relationship_health = 'healthy'
-            elif frequency_normalized < 0.2 and recency_normalized > 0.7:
-                relationship_health = 'wilted'
-            elif recency_normalized > 0.5:
-                relationship_health = 'dormant'
-            elif frequency_normalized < 0.3:
-                relationship_health = 'attention'
-            else:
-                relationship_health = 'healthy'
+            # Use Conversation model's get_relationship_health() method for consistent status
+            # This uses a simpler, more reliable calculation based on days_since_contact
+            from app.models import Conversation, ConversationMetrics
+            try:
+                # Convert conversation dict to Conversation object to use its method
+                metrics_dict = conv.get('metrics', {})
+                metrics = ConversationMetrics.from_dict(metrics_dict)
+                temp_conv = Conversation(
+                    user_id=user_id,
+                    partner_name=get_partner_name(conv) or 'Unknown',
+                    partner_id=conv.get('id', ''),
+                    messages=[],
+                    metrics=metrics,
+                    category=conv.get('category', 'friends')
+                )
+                relationship_health = temp_conv.get_relationship_health()
+            except Exception as e:
+                # Fallback to simple calculation if conversion fails
+                print(f"[CONTACTS] Error calculating status, using fallback: {str(e)}")
+                if days_since_contact > 60:
+                    relationship_health = 'wilted'
+                elif days_since_contact > 30:
+                    relationship_health = 'dormant'
+                elif days_since_contact > 14:
+                    relationship_health = 'attention'
+                else:
+                    relationship_health = 'healthy'
+            
+            # Extract partner name with better fallback logic
+            partner_name = get_partner_name(conv) or conv.get('partnerName') or conv.get('partner_name')
+            
+            # If name is still a phone number or email, try to get better name
+            if partner_name and ('+' in partner_name or ('@' in partner_name and '.' in partner_name.split('@')[1])):
+                # It's a phone/email, check if we have a saved displayName
+                partner_name = conv.get('displayName') or partner_name
+                # If still phone/email, that's the best we have
+                if '+' in partner_name or ('@' in partner_name and '.' in partner_name.split('@')[1]):
+                    # Log for debugging
+                    print(f"[CONTACTS] Contact {conv.get('id')} still has phone/email as name: {partner_name}")
             
             # Create contact object from conversation
             contact = {
                 'id': conv.get('id'),
-                'name': get_partner_name(conv) or 'Unknown',
+                'name': partner_name or 'Unknown',
                 'category': conv.get('category', 'friends'),
                 'tone': conversation_tone,  # Conversation-specific tone
                 'status': relationship_health,  # Calculated from frequency + recency

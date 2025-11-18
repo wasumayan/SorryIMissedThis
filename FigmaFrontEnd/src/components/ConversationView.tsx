@@ -20,6 +20,7 @@ import {
 import { apiClient } from "../services/api";
 import { localMessageStorage } from "../services/localStorage";
 import { toast } from "sonner";
+import { CONVERSATION_CONSTANTS } from "../constants/conversation";
 
 interface Message {
   id: string;
@@ -50,7 +51,7 @@ interface Prompt {
 export function ConversationView({ contactName, contactId, conversationId, userId, onBack }: ConversationViewProps) {
   const [selectedPrompt, setSelectedPrompt] = useState(0);
   const [customPrompt, setCustomPrompt] = useState("");
-  const [tone, setTone] = useState([50]); // 0-100 scale
+  const [tone, setTone] = useState([CONVERSATION_CONSTANTS.DEFAULT_TONE]); // 0-100 scale
   const [sent, setSent] = useState(false);
   const [sending, setSending] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -59,10 +60,8 @@ export function ConversationView({ contactName, contactId, conversationId, userI
   const [daysSinceContact, setDaysSinceContact] = useState<number>(0);
   const [reciprocity, setReciprocity] = useState<number>(0.5);
   const [isLoading, setIsLoading] = useState(true);
-  const [conversationData, setConversationData] = useState<any>(null);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [dismissedPrompts, setDismissedPrompts] = useState<Set<number>>(new Set());
-  const [isEditing, setIsEditing] = useState(false);
 
   // Fetch conversation data, messages, and prompts
   useEffect(() => {
@@ -86,13 +85,19 @@ export function ConversationView({ contactName, contactId, conversationId, userI
         // Process conversation details
         if (convResponse.status === 'fulfilled' && convResponse.value.success && convResponse.value.data) {
           const conv = convResponse.value.data.conversation;
-          setConversationData(conv);
           
-          // Extract metrics
-          const daysSince = conv.metrics?.days_since_contact || conv.daysSinceContact || 0;
-          const recip = conv.metrics?.reciprocity || conv.reciprocity || 0.5;
-          setDaysSinceContact(daysSince);
-          setReciprocity(recip);
+          // Extract metrics from conversation - backend returns snake_case in metrics object
+          // Type assertion needed because backend response structure differs from TypeScript interface
+          const metrics = (conv as any).metrics;
+          if (metrics) {
+            // Backend returns days_since_contact directly in metrics
+            const daysSince = metrics.days_since_contact ?? 0;
+            setDaysSinceContact(daysSince);
+            
+            // Backend returns reciprocity directly in metrics
+            const recip = metrics.reciprocity ?? 0.5;
+            setReciprocity(recip);
+          }
         }
 
         // Fetch messages from local storage (synchronous, no need to await)
@@ -149,7 +154,11 @@ export function ConversationView({ contactName, contactId, conversationId, userI
 
   const generateNewPrompts = async (convId: string) => {
     try {
-      const response = await apiClient.generateNewPrompts(convId, { num_prompts: 3 });
+      // FIXED: Pass tone to prompt generation
+      const response = await apiClient.generateNewPrompts(convId, { 
+        num_prompts: CONVERSATION_CONSTANTS.DEFAULT_PROMPT_COUNT,
+        tone: getToneName(tone[0]).toLowerCase() // Convert to lowercase for API
+      });
       if (response.success && response.data) {
         const newPrompts: Prompt[] = response.data.prompts.map((p: any) => ({
           id: p.prompt_id,
@@ -251,12 +260,13 @@ export function ConversationView({ contactName, contactId, conversationId, userI
       const now = new Date();
       const diffMs = now.getTime() - date.getTime();
       const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+      const { TIME_THRESHOLDS } = CONVERSATION_CONSTANTS;
       
       if (diffDays === 0) return 'Today';
       if (diffDays === 1) return 'Yesterday';
-      if (diffDays < 7) return `${diffDays} days ago`;
-      if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`;
-      if (diffDays < 365) return `${Math.floor(diffDays / 30)} months ago`;
+      if (diffDays < TIME_THRESHOLDS.DAYS) return `${diffDays} days ago`;
+      if (diffDays < TIME_THRESHOLDS.WEEKS) return `${Math.floor(diffDays / 7)} weeks ago`;
+      if (diffDays < TIME_THRESHOLDS.MONTHS) return `${Math.floor(diffDays / 30)} months ago`;
       return `${Math.floor(diffDays / 365)} years ago`;
     } catch {
       return timestamp;
@@ -264,17 +274,19 @@ export function ConversationView({ contactName, contactId, conversationId, userI
   };
 
   const formatDaysAgo = (days: number): string => {
+    const { TIME_THRESHOLDS } = CONVERSATION_CONSTANTS;
     if (days === 0) return 'today';
     if (days === 1) return 'yesterday';
-    if (days < 7) return `${days} days ago`;
-    if (days < 30) return `${Math.floor(days / 7)} weeks ago`;
-    if (days < 365) return `${Math.floor(days / 30)} months ago`;
+    if (days < TIME_THRESHOLDS.DAYS) return `${days} days ago`;
+    if (days < TIME_THRESHOLDS.WEEKS) return `${Math.floor(days / 7)} weeks ago`;
+    if (days < TIME_THRESHOLDS.MONTHS) return `${Math.floor(days / 30)} months ago`;
     return `${Math.floor(days / 365)} years ago`;
   };
 
   const getToneName = (value: number) => {
-    if (value < 33) return "Formal";
-    if (value < 66) return "Friendly";
+    const { TONE_THRESHOLDS } = CONVERSATION_CONSTANTS;
+    if (value < TONE_THRESHOLDS.FORMAL) return "Formal";
+    if (value < TONE_THRESHOLDS.FRIENDLY) return "Friendly";
     return "Playful";
   };
 
@@ -371,7 +383,7 @@ export function ConversationView({ contactName, contactId, conversationId, userI
 
         setTimeout(() => {
           onBack();
-        }, 2000);
+        }, CONVERSATION_CONSTANTS.NAVIGATE_BACK_DELAY);
       } else {
         toast.error('Failed to send message', {
           description: result.error || 'Unknown error occurred. Please try again.',
@@ -428,12 +440,12 @@ export function ConversationView({ contactName, contactId, conversationId, userI
                 <div className="flex items-center gap-4 mt-3 flex-wrap">
                   <div className="flex items-center gap-2">
                     <div className="text-xs text-muted-foreground">Reciprocity:</div>
-                    <div className="flex gap-0.5">
-                        {[1, 2, 3, 4, 5].map((i) => (
+                      <div className="flex gap-0.5">
+                        {Array.from({ length: CONVERSATION_CONSTANTS.RECIPROCITY_BARS }, (_, i) => i + 1).map((i) => (
                           <div
                             key={i}
                             className={`w-2 h-4 rounded-sm ${
-                              i <= Math.round(reciprocity * 5)
+                              i <= Math.round(reciprocity * CONVERSATION_CONSTANTS.RECIPROCITY_BARS)
                                 ? 'bg-gradient-to-t from-primary to-primary/70'
                                 : 'bg-muted'
                             }`}
@@ -468,11 +480,12 @@ export function ConversationView({ contactName, contactId, conversationId, userI
                   className={`flex ${message.sender === "user" ? "justify-end" : "justify-start"}`}
                 >
                   <div
-                    className={`max-w-[70%] rounded-2xl px-4 py-2 ${
+                    className={`rounded-2xl px-4 py-2 ${
                       message.sender === "user"
                         ? "bg-primary text-primary-foreground"
                         : "bg-muted text-foreground"
                     }`}
+                    style={{ maxWidth: CONVERSATION_CONSTANTS.MESSAGE_BUBBLE_MAX_WIDTH }}
                   >
                     <p style={{ fontSize: '0.9375rem' }}>{message.text}</p>
                     <p
@@ -623,11 +636,8 @@ export function ConversationView({ contactName, contactId, conversationId, userI
                   value={customPrompt || (prompts[selectedPrompt]?.text || '')}
                   onChange={(e) => {
                     setCustomPrompt(e.target.value);
-                    setIsEditing(true);
                   }}
-                  onFocus={() => setIsEditing(true)}
-                  onBlur={() => setIsEditing(false)}
-                  rows={4}
+                  rows={CONVERSATION_CONSTANTS.TEXTAREA_ROWS}
                   placeholder="Click a prompt above, then edit it here to customize your message..."
                   className={`resize-none transition-all ${
                     customPrompt && prompts[selectedPrompt] && customPrompt.trim() !== prompts[selectedPrompt].text.trim()
@@ -661,8 +671,8 @@ export function ConversationView({ contactName, contactId, conversationId, userI
                   <Slider
                     value={tone}
                     onValueChange={setTone}
-                    max={100}
-                    step={1}
+                    max={CONVERSATION_CONSTANTS.TONE_MAX}
+                    step={CONVERSATION_CONSTANTS.TONE_STEP}
                     className="w-full"
                   />
                   <div className="flex justify-between text-muted-foreground" style={{ fontSize: '0.75rem' }}>

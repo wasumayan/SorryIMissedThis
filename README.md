@@ -50,12 +50,12 @@ SIMT visualizes your relationships as a living grove, with you as the gardener a
 - **State Management**: React hooks
 - **Styling**: Custom design system with nature metaphors
 
-### Backend (Node.js + Express)
-- **Runtime**: Node.js 18+
-- **Framework**: Express.js
-- **Database**: MongoDB (Azure Cosmos DB)
-- **Authentication**: JWT tokens
-- **AI Integration**: OpenAI GPT-4
+### Backend (Python + Flask)
+- **Runtime**: Python 3.9+
+- **Framework**: Flask
+- **Database**: Azure Cosmos DB (MongoDB-compatible)
+- **Authentication**: Token-based sessions
+- **AI Integration**: Azure OpenAI (GPT-4o-mini)
 
 ### Cloud Infrastructure (Azure)
 - **App Service**: Host backend API
@@ -81,21 +81,23 @@ cd SorryIMissedThis
 ### 2. Backend Setup
 ```bash
 cd backend
-npm install
-cp env.example .env
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
 ```
 
-Edit `.env` with your configuration:
+Set environment variables (see `backend/README_TEAM.md` for details):
 ```env
-MONGODB_URI=mongodb://localhost:27017/simt
-JWT_SECRET=your-super-secret-jwt-key
-OPENAI_API_KEY=your-openai-api-key
+AZURE_COSMOS_ENDPOINT=your-cosmos-endpoint
+AZURE_COSMOS_KEY=your-cosmos-key
+AZURE_OPENAI_ENDPOINT=your-openai-endpoint
+AZURE_OPENAI_KEY=your-openai-key
 FRONTEND_URL=http://localhost:5173
 ```
 
 Start the backend:
 ```bash
-npm run dev
+python run.py
 ```
 
 ### 3. Frontend Setup
@@ -116,8 +118,8 @@ npm run dev
 
 ### 4. Access the Application
 - Frontend: http://localhost:5173
-- Backend API: http://localhost:3000
-- Health Check: http://localhost:3000/health
+- Backend API: http://localhost:5002 (default Flask port)
+- Health Check: http://localhost:5002/health
 
 ## 🏗️ Azure Deployment
 
@@ -148,18 +150,20 @@ Deploy the frontend to Azure Static Web Apps or your preferred hosting service.
 ### Project Structure
 ```
 SorryIMissedThis/
-├── backend/                 # Node.js API
-│   ├── src/
-│   │   ├── models/         # Database models
+├── backend/                 # Python Flask API
+│   ├── app/
+│   │   ├── models/         # Data models
 │   │   ├── routes/         # API routes
 │   │   ├── services/       # Business logic
-│   │   └── middleware/     # Express middleware
+│   │   └── utils/          # Utilities
 │   ├── scripts/            # Deployment scripts
-│   └── azure-deploy.yml    # GitHub Actions
+│   ├── requirements.txt    # Python dependencies
+│   └── run.py             # Application entry point
 ├── FigmaFrontEnd/          # React frontend
 │   ├── src/
 │   │   ├── components/     # React components
 │   │   ├── services/       # API client
+│   │   ├── constants/      # Constants files
 │   │   └── styles/         # CSS and styling
 │   └── package.json
 └── README.md

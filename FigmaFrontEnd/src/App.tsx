@@ -9,12 +9,13 @@ import { Schedule } from "./components/Schedule";
 import { StudyEnrollment } from "./components/StudyEnrollment";
 import { StudyStatusBanner } from "./components/StudyStatusBanner";
 import { PostConditionSurvey } from "./components/PostConditionSurvey";
+import { NetworkGraphTest } from "./components/NetworkGraphTest";
 import { Button } from "./components/ui/button";
 import { Settings as SettingsIcon, Moon, Sun } from "lucide-react";
 import { apiClient, User, Contact, StudyParticipant, StudyStatus } from "./services/api";
 import { Toaster } from "./components/ui/sonner";
 
-type View = "onboarding" | "study-enrollment" | "study-survey" | "grove" | "conversation" | "analytics" | "settings" | "schedule";
+type View = "onboarding" | "study-enrollment" | "study-survey" | "grove" | "conversation" | "analytics" | "settings" | "schedule" | "network-test";
 
 export default function App() {
   const [currentView, setCurrentView] = useState<View>("onboarding");
@@ -309,6 +310,10 @@ export default function App() {
               setCurrentView("onboarding");
             }}
           />
+        )}
+
+        {currentView === "network-test" && (
+          <NetworkGraphTest />
         )}
       </div>
     </div>

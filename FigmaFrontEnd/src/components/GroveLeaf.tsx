@@ -16,7 +16,7 @@ interface LeafProps {
 
 export function GroveLeaf({ 
   name, 
-  category,
+  category: _category, // Part of Contact interface but not used in visualization
   status, 
   size, 
   x, 
@@ -64,7 +64,7 @@ export function GroveLeaf({
     animate: {
       scale: 1,
       opacity: status === "wilted" ? 0.6 : 1,
-      transition: { duration: reducedMotion ? 0 : 0.6, ease: "easeOut" },
+      transition: { duration: reducedMotion ? 0 : 0.6, ease: "easeOut" as const },
     },
     hover: {
       scale: reducedMotion ? 1 : 1.2,
@@ -82,21 +82,19 @@ export function GroveLeaf({
         transition: {
           duration: 3 + Math.random() * 2,
           repeat: Infinity,
-          ease: "easeInOut",
+          ease: "easeInOut" as const,
         },
       };
 
   // Blooming animation from bud to leaf
-  const bloomVariants = isBloomingFromBud
-    ? {
-        initial: { scale: 1, opacity: 1 },
-        bloom: {
-          scale: [1, 1.3, 1],
-          rotate: [0, 10, -10, 0],
-          transition: { duration: 1.2, ease: "easeInOut" },
-        },
-      }
-    : {};
+  const bloomVariants = isBloomingFromBud ? {
+    initial: { scale: 1, opacity: 1 },
+    bloom: {
+      scale: [1, 1.3, 1],
+      rotate: [0, 10, -10, 0],
+      transition: { duration: 1.2, ease: "easeInOut" as const },
+    },
+  } : undefined;
 
   // Dormant contacts are flower buds (not yet bloomed)
   if (status === "dormant" && !isBloomingFromBud) {
@@ -231,7 +229,7 @@ export function GroveLeaf({
       <motion.g
         animate={swayAnimation}
         style={{ transformOrigin: `${x}px ${y}px` }}
-        variants={bloomVariants}
+        variants={bloomVariants || undefined}
       >
         {/* Leaf shape */}
         <g transform={`translate(${x}, ${y}) rotate(${rotation})`}>

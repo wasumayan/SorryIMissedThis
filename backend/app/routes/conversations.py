@@ -371,7 +371,15 @@ def generate_new_prompts(conversation_id):
                                 msg_time = datetime.now(timezone.utc)
                             
                             is_from_me = msg.get('isFromMe', False)
-                            sender = user_id if is_from_me else (msg.get('handle', {}).get('name') or msg.get('sender', 'Unknown'))
+                            # Consistently use 'user' for user messages, partner_name for contact messages
+                            # This ensures AI can properly distinguish who said what
+                            if is_from_me:
+                                sender = 'user'  # Consistent identifier for user messages
+                            else:
+                                # Get partner name from conversation
+                                partner_name = conversation.get('partnerName') if isinstance(conversation, dict) else getattr(conversation, 'partner_name', 'Contact')
+                                sender = partner_name
+                            
                             content = msg.get('text') or ''
                             
                             if content:  # Only include messages with text for AI analysis

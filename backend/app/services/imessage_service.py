@@ -441,6 +441,20 @@ class iMessageService:
                     contact_info = name_service.extract_contact_info_from_chat_id(chat_id)
                     phone_number = contact_info.get('phone_number')
                     
+                    # Extract user's name from their own messages to exclude from inference
+                    user_names = []
+                    for msg in all_messages:
+                        if msg.get('isFromMe', False):
+                            sender_name = msg.get('senderName') or msg.get('sender')
+                            if sender_name and sender_name not in user_names:
+                                # Extract name parts (first name, full name variations)
+                                name_parts = sender_name.split()
+                                if len(name_parts) > 0:
+                                    user_names.append(name_parts[0])  # First name
+                                if len(name_parts) > 1:
+                                    user_names.append(' '.join(name_parts))  # Full name
+                                user_names.append(sender_name)  # Original name
+                    
                     # Try AI name inference first (most reliable)
                     chat_name = None
                     try:
@@ -448,7 +462,8 @@ class iMessageService:
                             chat_id=chat_id,
                             display_name=display_name,
                             messages=all_messages,
-                            phone_number=phone_number
+                            phone_number=phone_number,
+                            user_names=user_names if user_names else None
                         )
                     except Exception as e:
                         # If name inference fails (e.g., 401 error), use fallback
