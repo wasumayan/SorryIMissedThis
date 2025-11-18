@@ -604,11 +604,8 @@ class ApiClient {
   // Study endpoints for 3-condition research experiment
   async enrollInStudy(userId: string) {
     return this.request<{
-      success: boolean;
-      data: {
-        participant: StudyParticipant;
-        message: string;
-      };
+      participant: StudyParticipant;
+      message: string;
     }>('/study/enroll', {
       method: 'POST',
       body: JSON.stringify({ userId }),

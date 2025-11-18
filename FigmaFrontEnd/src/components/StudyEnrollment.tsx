@@ -30,7 +30,7 @@ export function StudyEnrollment({ userId, onEnrolled, onSkip }: StudyEnrollmentP
     try {
       const response = await apiClient.enrollInStudy(userId);
 
-      if (response.success && response.data?.participant) {
+      if (response.success && response.data) {
         toast.success(response.data.message || "Successfully enrolled in study!");
         onEnrolled(response.data.participant);
       } else {
@@ -86,9 +86,9 @@ export function StudyEnrollment({ userId, onEnrolled, onSkip }: StudyEnrollmentP
                 <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
                   <Clock className="h-5 w-5 mt-0.5 text-muted-foreground" />
                   <div>
-                    <p className="font-medium">9-Day Study Period</p>
+                    <p className="font-medium">3-Day Study Period</p>
                     <p className="text-sm text-muted-foreground">
-                      Three 3-day conditions with different prompt types
+                      Three 1-day conditions with different prompt types
                     </p>
                   </div>
                 </div>
@@ -108,7 +108,7 @@ export function StudyEnrollment({ userId, onEnrolled, onSkip }: StudyEnrollmentP
                   <div>
                     <p className="font-medium">Brief Surveys</p>
                     <p className="text-sm text-muted-foreground">
-                      Short survey after each 3-day condition (~5 minutes)
+                      Short survey after each 1-day condition (~5 minutes)
                     </p>
                   </div>
                 </div>

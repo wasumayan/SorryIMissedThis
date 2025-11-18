@@ -56,7 +56,7 @@ def enroll_participant():
             condition_order=get_counterbalanced_order(participant_count),
             current_condition_index=0,
             study_start_date=datetime.now(),
-            study_end_date=datetime.now() + timedelta(days=9),
+            study_end_date=datetime.now() + timedelta(days=3),  # 3 days total (1 day per condition)
             completed_conditions=[],
             is_study_complete=False
         )

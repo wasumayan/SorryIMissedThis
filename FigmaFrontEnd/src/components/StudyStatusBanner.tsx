@@ -64,7 +64,7 @@ export function StudyStatusBanner({
 
   const conditionInfo = CONDITION_INFO[participant.currentCondition];
   const currentDay = participant.daysInCurrentCondition;
-  const totalDays = 3;
+  const totalDays = 1;  // Each condition is 1 day
   const conditionNumber = participant.currentConditionIndex + 1;
   const totalConditions = participant.conditionOrder.length;
 

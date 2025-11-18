@@ -13,7 +13,7 @@ class StudyCondition:
     condition_type: str  # 'no_prompt', 'generic_prompt', 'context_aware'
     start_date: datetime
     end_date: datetime
-    day_in_condition: int  # 1-3
+    day_in_condition: int  # Always 1 (1 day per condition)
     is_complete: bool = False
     survey_completed: bool = False
 
@@ -37,7 +37,7 @@ class StudyParticipant:
     condition_order: List[str]  # e.g., ['no_prompt', 'generic_prompt', 'context_aware']
     current_condition_index: int  # 0, 1, or 2
     study_start_date: datetime
-    study_end_date: datetime  # study_start_date + 9 days
+    study_end_date: datetime  # study_start_date + 3 days (1 day per condition)
     completed_conditions: List[str] = field(default_factory=list)
     is_study_complete: bool = False
 
@@ -50,20 +50,18 @@ class StudyParticipant:
 
     @property
     def current_condition_start(self) -> datetime:
-        """Get start date of current condition (3-day cycles)"""
-        return self.study_start_date + timedelta(days=self.current_condition_index * 3)
+        """Get start date of current condition (1-day cycles)"""
+        return self.study_start_date + timedelta(days=self.current_condition_index)
 
     @property
     def current_condition_end(self) -> datetime:
-        """Get end date of current condition"""
-        return self.current_condition_start + timedelta(days=3)
+        """Get end date of current condition (24 hours)"""
+        return self.current_condition_start + timedelta(days=1)
 
     @property
     def days_in_current_condition(self) -> int:
-        """Calculate which day (1-3) participant is in current condition"""
-        now = datetime.now()
-        days_elapsed = (now - self.current_condition_start).days
-        return min(max(1, days_elapsed + 1), 3)  # Clamp to 1-3
+        """Calculate which day participant is in current condition (always 1)"""
+        return 1  # Each condition is only 1 day
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -88,7 +86,7 @@ class StudyMetrics:
     """Metrics collected during study conditions"""
     user_id: str
     condition: str
-    day: int  # 1-3
+    day: int  # Always 1 (1 day per condition)
     date: datetime
 
     # Message metrics
