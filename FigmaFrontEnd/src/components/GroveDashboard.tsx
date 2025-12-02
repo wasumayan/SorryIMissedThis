@@ -2,12 +2,13 @@ import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { AnimatePresence } from "motion/react";
 import { GroveSVG } from "./GroveSVG";
 import { RelationshipStatsModal } from "./RelationshipStatsModal";
+import { ConditionSwitcher } from "./ConditionSwitcher";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
 import { Droplet, Search, Calendar, TrendingUp, RefreshCw } from "lucide-react";
-import { apiClient, User, Contact, DailySuggestion } from "../services/api";
+import { apiClient, User, Contact, DailySuggestion, StudyParticipant } from "../services/api";
 import { toast } from "sonner";
 import { GROVE_CONSTANTS } from "../constants/grove";
 
@@ -16,9 +17,11 @@ interface GroveDashboardProps {
   onContactSelect: (contact: Contact) => void;
   onViewAnalytics: () => void;
   onViewSchedule: () => void;
+  studyStatus?: StudyParticipant | null;
+  onStudyStatusUpdate?: (participant: StudyParticipant) => void;
 }
 
-export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewSchedule }: GroveDashboardProps) {
+export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewSchedule, studyStatus, onStudyStatusUpdate }: GroveDashboardProps) {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [activeFilter, setActiveFilter] = useState<string>("All");
   const [searchQuery, setSearchQuery] = useState("");
@@ -330,9 +333,9 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
                   </div>
                 </div>
                 <div className="pt-2 border-t text-muted-foreground" style={{ fontSize: '0.7rem' }}>
-                  <p>Line length = recency (recent = closer to center)</p>
-                  <p>Line thickness = frequency (avg messages/day, past 50 days)</p>
-                  <p>Health = function of frequency + recency</p>
+                  <p>Branch length = days since last contact</p>
+                  <p>Branch thickness = message frequency (past 50 days)</p>
+                  <p>Health = balanced function of frequency + recency</p>
                 </div>
               </Card>
             </div>
@@ -343,6 +346,34 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
         <div className="w-80 border-l bg-card/30 backdrop-blur-sm flex flex-col min-h-0">
           <div className="flex-1 overflow-y-auto min-h-0">
             <div className="p-6 space-y-6">
+              {/* Study Condition Switcher */}
+              {studyStatus && onStudyStatusUpdate ? (
+                <>
+                  {console.log('[GROVE] Rendering ConditionSwitcher with participant:', {
+                    condition: studyStatus.currentCondition,
+                    index: studyStatus.currentConditionIndex,
+                    completed: studyStatus.completedConditions
+                  })}
+                  <ConditionSwitcher
+                    participant={studyStatus}
+                    onConditionComplete={(updatedParticipant) => {
+                      console.log('[GROVE] onConditionComplete called with:', {
+                        newCondition: updatedParticipant.currentCondition,
+                        newIndex: updatedParticipant.currentConditionIndex
+                      });
+                      onStudyStatusUpdate(updatedParticipant);
+                    }}
+                  />
+                </>
+              ) : (
+                console.log('[GROVE] Study status check:', {
+                  hasStudyStatus: !!studyStatus,
+                  hasUpdateCallback: !!onStudyStatusUpdate,
+                  studyStatus
+                }),
+                null
+              )}
+
               {/* Today's Prompts */}
               <div className="space-y-3">
                 <div className="flex items-center gap-2">

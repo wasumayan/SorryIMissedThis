@@ -21,6 +21,7 @@ import { apiClient } from "../services/api";
 import { localMessageStorage } from "../services/localStorage";
 import { toast } from "sonner";
 import { CONVERSATION_CONSTANTS } from "../constants/conversation";
+import { getRandomGenericPrompts } from "../utils/genericPrompts";
 
 interface Message {
   id: string;
@@ -36,6 +37,7 @@ interface ConversationViewProps {
   conversationId?: string;
   userId?: string;
   onBack: () => void;
+  studyCondition?: string; // 'no_prompt', 'generic_prompt', or 'context_aware'
 }
 
 interface Prompt {
@@ -48,7 +50,7 @@ interface Prompt {
   confidence?: number;
 }
 
-export function ConversationView({ contactName, contactId, conversationId, userId, onBack }: ConversationViewProps) {
+export function ConversationView({ contactName, contactId, conversationId, userId, onBack, studyCondition }: ConversationViewProps) {
   const [selectedPrompt, setSelectedPrompt] = useState(0);
   const [customPrompt, setCustomPrompt] = useState("");
   const [tone, setTone] = useState([CONVERSATION_CONSTANTS.DEFAULT_TONE]); // 0-100 scale
@@ -111,27 +113,45 @@ export function ConversationView({ contactName, contactId, conversationId, userI
         }));
         setMessages(formattedMessages);
 
-        // Process prompts
-        if (promptsResponse.status === 'fulfilled' && promptsResponse.value.success && promptsResponse.value.data) {
-          const apiPrompts: Prompt[] = promptsResponse.value.data.prompts.map((p: any) => ({
-            id: p.prompt_id,
+        // Process prompts based on study condition
+        if (studyCondition === 'no_prompt') {
+          // No prompts for no_prompt condition
+          setPrompts([]);
+          setCustomPrompt('');
+        } else if (studyCondition === 'generic_prompt') {
+          // Use generic prompts
+          const genericPrompts = getRandomGenericPrompts(CONVERSATION_CONSTANTS.DEFAULT_PROMPT_COUNT);
+          const formattedGenericPrompts: Prompt[] = genericPrompts.map((p, index) => ({
+            id: `generic-${index}`,
             text: p.text,
-            reason: p.context || p.type || 'AI-generated prompt',
-            type: p.type,
-            context: p.context,
-            confidence: p.confidence
+            reason: `Generic ${p.category} prompt`,
+            type: p.category
           }));
-          
-          if (apiPrompts.length > 0) {
-            setPrompts(apiPrompts);
-            setCustomPrompt(apiPrompts[0].text);
+          setPrompts(formattedGenericPrompts);
+          setCustomPrompt(formattedGenericPrompts[0]?.text || '');
+        } else {
+          // Default: context-aware prompts (or when not in study)
+          if (promptsResponse.status === 'fulfilled' && promptsResponse.value.success && promptsResponse.value.data) {
+            const apiPrompts: Prompt[] = promptsResponse.value.data.prompts.map((p: any) => ({
+              id: p.prompt_id,
+              text: p.text,
+              reason: p.context || p.type || 'AI-generated prompt',
+              type: p.type,
+              context: p.context,
+              confidence: p.confidence
+            }));
+
+            if (apiPrompts.length > 0) {
+              setPrompts(apiPrompts);
+              setCustomPrompt(apiPrompts[0].text);
+            } else {
+              // Generate new prompts if none exist
+              await generateNewPrompts(convId || '');
+            }
           } else {
-            // Generate new prompts if none exist
+            // Generate new prompts if fetch failed
             await generateNewPrompts(convId || '');
           }
-        } else {
-          // Generate new prompts if fetch failed
-          await generateNewPrompts(convId || '');
         }
 
         // Process summary (optional)
@@ -154,10 +174,52 @@ export function ConversationView({ contactName, contactId, conversationId, userI
 
   const generateNewPrompts = async (convId: string) => {
     try {
-      // FIXED: Pass tone to prompt generation
-      const response = await apiClient.generateNewPrompts(convId, { 
+      // Handle different study conditions
+      if (studyCondition === 'no_prompt') {
+        // No prompts for no_prompt condition
+        setPrompts([]);
+        setCustomPrompt('');
+        return;
+      }
+
+      if (studyCondition === 'generic_prompt') {
+        // Use generic prompts
+        const genericPrompts = getRandomGenericPrompts(CONVERSATION_CONSTANTS.DEFAULT_PROMPT_COUNT);
+        const formattedGenericPrompts: Prompt[] = genericPrompts.map((p, index) => ({
+          id: `generic-${index}`,
+          text: p.text,
+          reason: `Generic ${p.category} prompt`,
+          type: p.category
+        }));
+        setPrompts(formattedGenericPrompts);
+        setDismissedPrompts(new Set());
+        if (formattedGenericPrompts.length > 0) {
+          setCustomPrompt(formattedGenericPrompts[0].text);
+          setSelectedPrompt(0);
+        }
+
+        // Log generic prompts shown for study metrics
+        if (userId && formattedGenericPrompts.length > 0) {
+          for (const prompt of formattedGenericPrompts) {
+            apiClient.logStudyMetric({
+              userId,
+              action: 'prompt_shown',
+              data: {
+                promptId: prompt.id,
+                conversationId: convId,
+                promptType: 'generic',
+                promptText: prompt.text
+              }
+            }).catch(err => console.error('Failed to log prompt_shown metric:', err));
+          }
+        }
+        return;
+      }
+
+      // Default: context-aware prompts
+      const response = await apiClient.generateNewPrompts(convId, {
         num_prompts: CONVERSATION_CONSTANTS.DEFAULT_PROMPT_COUNT,
-        tone: getToneName(tone[0]).toLowerCase() // Convert to lowercase for API
+        tone: getToneName(tone[0]).toLowerCase()
       });
       if (response.success && response.data) {
         const newPrompts: Prompt[] = response.data.prompts.map((p: any) => ({
@@ -169,7 +231,7 @@ export function ConversationView({ contactName, contactId, conversationId, userI
           confidence: p.confidence
         }));
         setPrompts(newPrompts);
-        setDismissedPrompts(new Set()); // Reset dismissed prompts
+        setDismissedPrompts(new Set());
         if (newPrompts.length > 0) {
           setCustomPrompt(newPrompts[0].text);
           setSelectedPrompt(0);
@@ -298,6 +360,72 @@ export function ConversationView({ contactName, contactId, conversationId, userI
       return;
     }
 
+    // For no-prompt condition, allow sending custom message directly
+    if (studyCondition === 'no_prompt') {
+      const messageToSend = customPrompt.trim();
+      if (!messageToSend) {
+        toast.error('Empty message', {
+          description: 'Please enter a message to send.',
+        });
+        return;
+      }
+
+      setSending(true);
+      try {
+        const { apiClient } = await import('../services/api');
+        const result = await apiClient.sendiMessage(
+          conversationId || contactId || '',
+          messageToSend,
+          userId
+        );
+
+        if (result.success) {
+          setSent(true);
+          toast.success('Message sent!', {
+            description: 'Your message has been sent via iMessage.',
+          });
+
+          // Log study metrics for message sent (no-prompt condition)
+          if (userId) {
+            apiClient.logStudyMetric({
+              userId,
+              action: 'message_sent',
+              data: {
+                conversationId: conversationId || contactId,
+                messageLength: messageToSend.length,
+                wasEdited: false,
+                condition: 'no_prompt'
+              }
+            }).catch(err => console.error('Failed to log message_sent metric:', err));
+          }
+
+          // Add message to local state
+          const newMessage: Message = {
+            id: `msg-${Date.now()}`,
+            sender: 'user',
+            text: messageToSend,
+            timestamp: formatTimestamp(new Date().toISOString()),
+            platform: 'imessage'
+          };
+          setMessages(prev => [...prev, newMessage]);
+          setCustomPrompt('');
+        } else {
+          toast.error('Failed to send', {
+            description: result.error || 'Please try again.',
+          });
+        }
+      } catch (error) {
+        console.error('Error sending message:', error);
+        toast.error('Failed to send', {
+          description: 'An error occurred. Please try again.',
+        });
+      } finally {
+        setSending(false);
+      }
+      return;
+    }
+
+    // For conditions with prompts
     if (prompts.length === 0 || !prompts[selectedPrompt]) {
       toast.error('No prompts available', {
         description: 'Please generate prompts first using the button above.',

@@ -13,8 +13,8 @@ export const GROVE_CONSTANTS = {
   SVG_HEIGHT: 800, // Fixed: was inconsistent (700 vs 800)
   
   // Branch layout
-  MIN_BRANCH_DISTANCE: 150, // Closest (recent contacts)
-  MAX_BRANCH_DISTANCE: 200, // Farthest (old contacts)
+  MIN_BRANCH_DISTANCE: 120, // Closest (recent contacts)
+  MAX_BRANCH_DISTANCE: 250, // Farthest (old contacts)
   MIN_BRANCH_THICKNESS: 2,
   MAX_BRANCH_THICKNESS: 8,
   

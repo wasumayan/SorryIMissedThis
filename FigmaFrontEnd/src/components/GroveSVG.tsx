@@ -1,4 +1,4 @@
-import { useEffect, useRef, useMemo, useState } from "react";
+import { useEffect, useRef, useMemo } from "react";
 import * as d3 from "d3";
 import { GroveLeafSVG } from "./GroveLeafSVG";
 import { GROVE_CONSTANTS } from "../constants/grove";
@@ -25,31 +25,49 @@ export function GroveSVG({ contacts, onContactClick, width, height }: GroveSVGPr
       return { nodes: [], links: [] };
     }
 
-    // Extract and normalize recency
+    // Extract raw recency values (days since contact)
     const rawRecencies = contacts.map(c => {
-      if (c.recency !== undefined) return c.recency;
       if (c.daysSinceContact !== undefined) {
-        return Math.min(1.0, c.daysSinceContact / RECENCY_NORMALIZATION_DAYS);
+        return c.daysSinceContact;
+      }
+      if (c.recency !== undefined) {
+        // If already normalized, convert back to days estimate
+        return c.recency * RECENCY_NORMALIZATION_DAYS;
       }
       if (c.lastContact) {
         const lastContactDate = new Date(c.lastContact);
         const daysSince = (Date.now() - lastContactDate.getTime()) / (1000 * 60 * 60 * 24);
-        return Math.min(1.0, daysSince / RECENCY_NORMALIZATION_DAYS);
+        return daysSince;
       }
-      return 0.5;
+      return 45; // Default to middle value
     });
 
-    // Extract and normalize frequency
+    // ADAPTIVE NORMALIZATION: Normalize recency based on min/max of current filtered contacts
+    // This ensures the most recent contact is always closest, and oldest is farthest
+    const minRecency = Math.min(...rawRecencies);
+    const maxRecency = Math.max(...rawRecencies);
+    const recencyRange = maxRecency - minRecency;
+
+    const normalizedRecencies = rawRecencies.map(r =>
+      recencyRange > 0 ? (r - minRecency) / recencyRange : 0.5
+    );
+
+    // Extract raw frequency values (messages per day)
     const rawFrequencies = contacts.map(c => {
-      if (c.frequency !== undefined) return c.frequency;
       if (c.metrics?.interactionFrequency !== undefined) {
-        return Math.min(1.0, c.metrics.interactionFrequency / FREQUENCY_MAX_MSG_PER_DAY);
+        return c.metrics.interactionFrequency;
+      }
+      if (c.frequency !== undefined) {
+        // If already normalized, convert back to estimate
+        return c.frequency * FREQUENCY_MAX_MSG_PER_DAY;
       }
       return 0;
     });
 
+    // ADAPTIVE NORMALIZATION: Normalize frequency based on max of current filtered contacts
+    // This ensures the most active contact gets maximum thickness
     const maxFrequency = Math.max(...rawFrequencies, 0.001);
-    const normalizedFrequencies = rawFrequencies.map(freq => 
+    const normalizedFrequencies = rawFrequencies.map(freq =>
       maxFrequency > 0 ? freq / maxFrequency : 0
     );
 
@@ -66,7 +84,7 @@ export function GroveSVG({ contacts, onContactClick, width, height }: GroveSVGPr
     const contactNodes = contacts.map((contact, i) => {
       const angleDegrees = (360 / totalContacts) * i;
       const angleRadians = (angleDegrees * Math.PI) / 180;
-      const recency = rawRecencies[i];
+      const recency = normalizedRecencies[i];
       const frequency = normalizedFrequencies[i];
       const distance = MIN_BRANCH_DISTANCE + recency * (MAX_BRANCH_DISTANCE - MIN_BRANCH_DISTANCE);
 
@@ -170,9 +188,9 @@ export function GroveSVG({ contacts, onContactClick, width, height }: GroveSVGPr
       const { WATERING_CAN, COLORS, LABEL_OFFSETS } = GROVE_CONSTANTS;
       
       // Get or create defs element (only once)
-      let defs = svg.select("defs");
+      let defs = svg.select<SVGDefsElement>("defs");
       if (defs.empty()) {
-        defs = svg.append("defs");
+        defs = svg.append<SVGDefsElement>("defs");
       }
       
       // Glow gradient

@@ -21,9 +21,14 @@ import {
   Upload,
   FileText,
   Database,
-  Settings as SettingsIcon
+  Settings as SettingsIcon,
+  BarChart3,
+  Users,
+  User as UserIcon
 } from "lucide-react";
 import { apiClient, User } from "../services/api";
+import { IndividualStudyStats } from "./IndividualStudyStats";
+import { TeamStudyStats } from "./TeamStudyStats";
 
 interface SettingsProps {
   user: User;
@@ -50,6 +55,7 @@ export function Settings({
   const [weeklyReflection, setWeeklyReflection] = useState(true);
   const [isPurging, setIsPurging] = useState(false);
   const [showPurgeConfirm, setShowPurgeConfirm] = useState(false);
+  const [currentView, setCurrentView] = useState<'settings' | 'individual-stats' | 'team-stats'>('settings');
   
   // Chat tracking preferences
   const [chatTrackingMode, setChatTrackingMode] = useState<'all' | 'recent' | 'selected'>(
@@ -181,6 +187,15 @@ export function Settings({
       console.error('Upload error:', err);
     }
   };
+
+  // View switching for study stats
+  if (currentView === 'individual-stats') {
+    return <IndividualStudyStats userId={user.id} onBack={() => setCurrentView('settings')} />;
+  }
+
+  if (currentView === 'team-stats') {
+    return <TeamStudyStats onBack={() => setCurrentView('settings')} />;
+  }
 
   return (
     <div className="h-screen flex flex-col bg-gradient-to-br from-background via-secondary/10 to-accent/5">
@@ -401,6 +416,39 @@ export function Settings({
                 className="w-full"
               >
                 {savingChatTracking ? 'Saving...' : 'Save Chat Tracking Preferences'}
+              </Button>
+            </div>
+          </Card>
+
+          {/* Study Data */}
+          <Card className="p-6 border-2 border-primary/20">
+            <div className="flex items-center gap-3 mb-6">
+              <BarChart3 className="w-6 h-6 text-primary" />
+              <div>
+                <h3>Study Data</h3>
+                <p className="text-muted-foreground text-sm">
+                  View your participation statistics and research data
+                </p>
+              </div>
+            </div>
+
+            <div className="grid gap-3">
+              <Button
+                onClick={() => setCurrentView('individual-stats')}
+                variant="outline"
+                className="w-full justify-start"
+              >
+                <UserIcon className="h-4 w-4 mr-2" />
+                My Study Stats
+              </Button>
+
+              <Button
+                onClick={() => setCurrentView('team-stats')}
+                variant="outline"
+                className="w-full justify-start"
+              >
+                <Users className="h-4 w-4 mr-2" />
+                All Participants (Team)
               </Button>
             </div>
           </Card>

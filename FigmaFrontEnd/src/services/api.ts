@@ -654,9 +654,65 @@ class ApiClient {
     });
   }
 
+  async advanceCondition(userId: string) {
+    return this.request<{
+      participant: StudyParticipant;
+      message: string;
+    }>('/study/advance-condition', {
+      method: 'POST',
+      body: JSON.stringify({ userId }),
+    });
+  }
+
   async exportStudyMetrics(userId?: string) {
     const params = userId ? `?userId=${encodeURIComponent(userId)}` : '';
     return this.request<string>(`/study/metrics/export${params}`);
+  }
+
+  async getIndividualStudyStats(userId: string) {
+    return this.request<{
+      enrolled: boolean;
+      participant?: StudyParticipant;
+      metricsByCondition?: Record<string, {
+        messages_sent: number;
+        prompts_shown: number;
+        prompts_accepted: number;
+        prompts_edited: number;
+        prompts_dismissed: number;
+        total_events: number;
+      }>;
+      surveys?: any[];
+      totalEvents?: number;
+      message?: string;
+    }>(`/study/stats/individual?userId=${encodeURIComponent(userId)}`);
+  }
+
+  async getAllStudyStats(password: string, statusFilter: 'all' | 'active' | 'completed' = 'all') {
+    return this.request<{
+      participants: Array<{
+        participant: StudyParticipant;
+        metrics: {
+          messages_sent: number;
+          prompts_shown: number;
+          prompts_accepted: number;
+          prompts_edited: number;
+          prompts_dismissed: number;
+        };
+        totalEvents: number;
+      }>;
+      aggregate: {
+        total_participants: number;
+        active_participants: number;
+        completed_participants: number;
+        total_messages: number;
+        total_prompts_shown: number;
+        total_prompts_accepted: number;
+        total_prompts_edited: number;
+        total_prompts_dismissed: number;
+        conditions_completed: number;
+      };
+      filter: string;
+    }>(`/study/stats/all?password=${encodeURIComponent(password)}&status=${statusFilter}`);
   }
 }
 

@@ -7,7 +7,6 @@ import { Analytics } from "./components/Analytics";
 import { Settings } from "./components/Settings";
 import { Schedule } from "./components/Schedule";
 import { StudyEnrollment } from "./components/StudyEnrollment";
-import { StudyStatusBanner } from "./components/StudyStatusBanner";
 import { PostConditionSurvey } from "./components/PostConditionSurvey";
 import { NetworkGraphTest } from "./components/NetworkGraphTest";
 import { Button } from "./components/ui/button";
@@ -27,7 +26,6 @@ export default function App() {
 
   // Study state
   const [studyStatus, setStudyStatus] = useState<StudyStatus | null>(null);
-  const [showStudyBanner, setShowStudyBanner] = useState(true);
 
   // Check for existing authentication
   useEffect(() => {
@@ -231,16 +229,6 @@ export default function App() {
     <>
       <Toaster richColors position="top-right" />
       <div className="h-screen flex flex-col">
-      {/* Study Status Banner */}
-      {studyStatus?.enrolled && studyStatus.participant && showStudyBanner && (
-        <StudyStatusBanner
-          participant={studyStatus.participant}
-          needsSurvey={studyStatus.needsSurvey}
-          onTakeSurvey={() => setCurrentView("study-survey")}
-          onDismiss={() => setShowStudyBanner(false)}
-        />
-      )}
-
       {/* Top Navigation */}
       {currentView === "grove" && (
         <div className="border-b bg-card/50 backdrop-blur-sm px-6 py-3 flex items-center justify-between">
@@ -273,6 +261,21 @@ export default function App() {
             onContactSelect={handleContactSelect}
             onViewAnalytics={() => setCurrentView("analytics")}
             onViewSchedule={() => setCurrentView("schedule")}
+            studyStatus={studyStatus?.participant || null}
+            onStudyStatusUpdate={(participant) => {
+              console.log('[App] Study participant updated:', {
+                previousCondition: studyStatus?.participant?.currentCondition,
+                newCondition: participant.currentCondition,
+                previousIndex: studyStatus?.participant?.currentConditionIndex,
+                newIndex: participant.currentConditionIndex,
+                completed: participant.completedConditions
+              });
+              if (studyStatus) {
+                const newStudyStatus = { ...studyStatus, participant };
+                console.log('[App] Setting study status:', newStudyStatus);
+                setStudyStatus(newStudyStatus);
+              }
+            }}
           />
         )}
 
@@ -283,6 +286,7 @@ export default function App() {
             conversationId={selectedContact.id}
             userId={user.id}
             onBack={handleBackToGrove}
+            studyCondition={studyStatus?.participant?.currentCondition}
           />
         )}
 
@@ -305,7 +309,6 @@ export default function App() {
               setUser(null);
               setStudyStatus(null);
               setSelectedContact(null);
-              setShowStudyBanner(true);
               // Redirect to onboarding
               setCurrentView("onboarding");
             }}

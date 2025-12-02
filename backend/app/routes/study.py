@@ -141,7 +141,7 @@ def get_study_status():
 @study_bp.route('/advance-condition', methods=['POST'])
 def advance_condition():
     """
-    Manually advance to next condition (after survey completion)
+    Manually advance to next condition (no survey required)
 
     Expected JSON body:
     {
@@ -158,25 +158,41 @@ def advance_condition():
         if not user_id:
             return jsonify({'error': 'userId is required'}), 400
 
-        participant = storage.get_study_participant(user_id)
+        participant_dict = storage.get_study_participant(user_id)
 
-        if not participant:
+        if not participant_dict:
             return jsonify({'error': 'Participant not found'}), 404
 
-        # Check if survey is completed for current condition
-        survey = storage.get_survey_response(user_id, participant.current_condition)
-        if not survey:
-            return jsonify({
-                'error': 'Must complete survey before advancing',
-                'currentCondition': participant.current_condition
-            }), 400
+        current_condition = participant_dict.get('currentCondition')
+        current_index = participant_dict.get('currentConditionIndex', 0)
+        condition_order = participant_dict.get('conditionOrder', [])
+        completed_conditions = participant_dict.get('completedConditions', [])
 
-        # Advance condition
-        participant.completed_conditions.append(participant.current_condition)
-        participant.current_condition_index += 1
+        # Advance condition (no survey check required)
+        if current_condition not in completed_conditions:
+            completed_conditions.append(current_condition)
 
-        if participant.current_condition_index >= len(participant.condition_order):
-            participant.is_study_complete = True
+        current_index += 1
+        is_complete = current_index >= len(condition_order)
+
+        # Update participant
+        participant_dict['currentConditionIndex'] = current_index
+        participant_dict['completedConditions'] = completed_conditions
+        participant_dict['isStudyComplete'] = is_complete
+
+        # Reconstruct StudyParticipant object for saving
+        from app.models.study import StudyParticipant
+        participant = StudyParticipant(
+            user_id=participant_dict['userId'],
+            participant_id=participant_dict['participantId'],
+            enrolled_date=datetime.fromisoformat(participant_dict['enrolledDate']),
+            condition_order=condition_order,
+            current_condition_index=current_index,
+            study_start_date=datetime.fromisoformat(participant_dict['studyStartDate']),
+            study_end_date=datetime.fromisoformat(participant_dict['studyEndDate']),
+            completed_conditions=completed_conditions,
+            is_study_complete=is_complete
+        )
 
         storage.save_study_participant(participant)
 
@@ -184,7 +200,7 @@ def advance_condition():
             'success': True,
             'data': {
                 'participant': participant.to_dict(),
-                'message': 'Advanced to next condition' if not participant.is_study_complete else 'Study complete!'
+                'message': 'Advanced to next phase!' if not is_complete else 'Study complete!'
             }
         }), 200
 
@@ -299,8 +315,8 @@ def log_metric():
         # Log the metric
         metric_event = {
             'userId': user_id,
-            'condition': participant.current_condition,
-            'day': participant.days_in_current_condition,
+            'condition': participant.get('currentCondition'),
+            'day': participant.get('daysInCurrentCondition', 1),
             'action': action,
             'timestamp': datetime.now().isoformat(),
             'data': event_data
@@ -333,7 +349,15 @@ def export_metrics():
         user_id = request.args.get('userId')
 
         # Get all metrics
-        metrics = storage.get_all_study_metrics(user_id)
+        all_metrics = storage.get_all_study_metrics(user_id)
+
+        # Group metrics by user
+        metrics_by_user = {}
+        for metric in all_metrics:
+            uid = metric.get('userId')
+            if uid not in metrics_by_user:
+                metrics_by_user[uid] = []
+            metrics_by_user[uid].append(metric)
 
         # Convert to CSV format
         import csv
@@ -344,29 +368,39 @@ def export_metrics():
 
         # Header
         writer.writerow([
-            'User ID', 'Participant ID', 'Condition', 'Day', 'Date',
-            'Messages Sent', 'Conversations Initiated',
-            'Prompts Shown', 'Prompts Accepted', 'Prompts Edited', 'Prompts Dismissed',
-            'Avg Message Length', 'Avg Response Time', 'Edit Rate'
+            'Participant ID', 'Condition',
+            'Messages Sent', 'Prompts Shown', 'Prompts Accepted', 'Prompts Edited', 'Prompts Dismissed',
+            'Total Events'
         ])
 
-        # Data rows
-        for metric in metrics:
+        # Data rows - one per user
+        for uid, user_metrics in metrics_by_user.items():
+            # Get participant data to fetch participantId
+            participant = storage.get_study_participant(uid)
+            if not participant:
+                continue
+                
+            participant_id = participant.get('participantId', 'N/A')
+            condition = participant.get('currentCondition', 'N/A')
+            
+            # Count metrics by action type (matching the stats/all endpoint logic)
+            stats = {
+                'messages_sent': sum(1 for m in user_metrics if m.get('action') == 'message_sent'),
+                'prompts_shown': sum(1 for m in user_metrics if m.get('action') == 'prompt_shown'),
+                'prompts_accepted': sum(1 for m in user_metrics if m.get('action') == 'prompt_accepted'),
+                'prompts_edited': sum(1 for m in user_metrics if m.get('action') == 'prompt_edited'),
+                'prompts_dismissed': sum(1 for m in user_metrics if m.get('action') == 'prompt_dismissed'),
+            }
+            
             writer.writerow([
-                metric.get('userId'),
-                metric.get('participantId'),
-                metric.get('condition'),
-                metric.get('day'),
-                metric.get('date'),
-                metric.get('metrics', {}).get('messagesSent', 0),
-                metric.get('metrics', {}).get('conversationsInitiated', 0),
-                metric.get('metrics', {}).get('promptsShown', 0),
-                metric.get('metrics', {}).get('promptsAccepted', 0),
-                metric.get('metrics', {}).get('promptsEdited', 0),
-                metric.get('metrics', {}).get('promptsDismissed', 0),
-                metric.get('metrics', {}).get('avgMessageLength', 0),
-                metric.get('metrics', {}).get('avgResponseTime', 0),
-                metric.get('metrics', {}).get('editRate', 0),
+                participant_id,
+                condition,
+                stats['messages_sent'],
+                stats['prompts_shown'],
+                stats['prompts_accepted'],
+                stats['prompts_edited'],
+                stats['prompts_dismissed'],
+                len(user_metrics)
             ])
 
         output.seek(0)
@@ -377,4 +411,194 @@ def export_metrics():
 
     except Exception as e:
         current_app.logger.error(f"Error exporting metrics: {str(e)}")
+        return jsonify({'error': 'Internal server error', 'message': str(e)}), 500
+
+
+@study_bp.route('/stats/individual', methods=['GET'])
+def get_individual_stats():
+    """
+    Get individual participant's study statistics
+
+    Query Parameters:
+        - userId: User ID (required)
+
+    Returns:
+        - participant: Participant info
+        - metrics: Aggregated metrics by condition
+        - surveys: Survey responses
+    """
+    try:
+        user_id = request.args.get('userId')
+        if not user_id:
+            return jsonify({'error': 'userId is required'}), 400
+
+        # Get participant info
+        participant = storage.get_study_participant(user_id)
+        if not participant:
+            return jsonify({
+                'success': True,
+                'data': {
+                    'enrolled': False,
+                    'message': 'Not enrolled in study'
+                }
+            }), 200
+
+        # Get all metrics for this participant
+        all_metrics = storage.get_all_study_metrics(user_id)
+
+        # Aggregate metrics by condition
+        metrics_by_condition = {}
+        for metric in all_metrics:
+            condition = metric.get('condition')
+            if condition not in metrics_by_condition:
+                metrics_by_condition[condition] = {
+                    'messages_sent': 0,
+                    'prompts_shown': 0,
+                    'prompts_accepted': 0,
+                    'prompts_edited': 0,
+                    'prompts_dismissed': 0,
+                    'total_events': 0
+                }
+
+            action = metric.get('action')
+            metrics_by_condition[condition]['total_events'] += 1
+
+            if action == 'message_sent':
+                metrics_by_condition[condition]['messages_sent'] += 1
+            elif action == 'prompt_shown':
+                metrics_by_condition[condition]['prompts_shown'] += 1
+            elif action == 'prompt_accepted':
+                metrics_by_condition[condition]['prompts_accepted'] += 1
+            elif action == 'prompt_edited':
+                metrics_by_condition[condition]['prompts_edited'] += 1
+            elif action == 'prompt_dismissed':
+                metrics_by_condition[condition]['prompts_dismissed'] += 1
+
+        # Get survey responses
+        surveys = []
+        condition_order = participant.get('conditionOrder', [])
+        for condition in condition_order:
+            survey = storage.get_survey_response(user_id, condition)
+            if survey:
+                surveys.append(survey)
+
+        return jsonify({
+            'success': True,
+            'data': {
+                'enrolled': True,
+                'participant': participant,
+                'metricsByCondition': metrics_by_condition,
+                'surveys': surveys,
+                'totalEvents': len(all_metrics)
+            }
+        }), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error getting individual stats: {str(e)}")
+        return jsonify({'error': 'Internal server error', 'message': str(e)}), 500
+
+
+@study_bp.route('/stats/all', methods=['GET'])
+def get_all_participants_stats():
+    """
+    Get statistics for all participants (team view)
+
+    Query Parameters:
+        - password: Admin password (required)
+        - status: Filter by completion status (optional: 'active', 'completed', 'all')
+
+    Returns:
+        - participants: List of all participants with stats
+        - aggregate: Aggregate metrics across all participants
+    """
+    try:
+        # Simple password protection
+        password = request.args.get('password')
+        ADMIN_PASSWORD = "research2024"  # TODO: Move to environment variable
+
+        if password != ADMIN_PASSWORD:
+            return jsonify({'error': 'Invalid password'}), 401
+
+        status_filter = request.args.get('status', 'all')
+
+        # Get all participants
+        # Note: This is a simplified version - in production, you'd query the database
+        all_participants = []
+        all_metrics = storage.get_all_study_metrics()  # Get all metrics
+
+        # Group metrics by user
+        metrics_by_user = {}
+        for metric in all_metrics:
+            user_id = metric.get('userId')
+            if user_id not in metrics_by_user:
+                metrics_by_user[user_id] = []
+            metrics_by_user[user_id].append(metric)
+
+        # Get participant info for each user
+        participant_stats = []
+        aggregate_stats = {
+            'total_participants': 0,
+            'active_participants': 0,
+            'completed_participants': 0,
+            'total_messages': 0,
+            'total_prompts_shown': 0,
+            'total_prompts_accepted': 0,
+            'total_prompts_edited': 0,
+            'total_prompts_dismissed': 0,
+            'conditions_completed': 0
+        }
+
+        for user_id in metrics_by_user.keys():
+            participant = storage.get_study_participant(user_id)
+            if not participant:
+                continue
+
+            # Filter by status
+            is_complete = participant.get('isStudyComplete', False)
+            if status_filter == 'completed' and not is_complete:
+                continue
+            if status_filter == 'active' and is_complete:
+                continue
+
+            # Count metrics for this participant
+            user_metrics = metrics_by_user[user_id]
+            stats = {
+                'messages_sent': sum(1 for m in user_metrics if m.get('action') == 'message_sent'),
+                'prompts_shown': sum(1 for m in user_metrics if m.get('action') == 'prompt_shown'),
+                'prompts_accepted': sum(1 for m in user_metrics if m.get('action') == 'prompt_accepted'),
+                'prompts_edited': sum(1 for m in user_metrics if m.get('action') == 'prompt_edited'),
+                'prompts_dismissed': sum(1 for m in user_metrics if m.get('action') == 'prompt_dismissed'),
+            }
+
+            participant_stats.append({
+                'participant': participant,
+                'metrics': stats,
+                'totalEvents': len(user_metrics)
+            })
+
+            # Update aggregate stats
+            aggregate_stats['total_participants'] += 1
+            if is_complete:
+                aggregate_stats['completed_participants'] += 1
+            else:
+                aggregate_stats['active_participants'] += 1
+
+            aggregate_stats['total_messages'] += stats['messages_sent']
+            aggregate_stats['total_prompts_shown'] += stats['prompts_shown']
+            aggregate_stats['total_prompts_accepted'] += stats['prompts_accepted']
+            aggregate_stats['total_prompts_edited'] += stats['prompts_edited']
+            aggregate_stats['total_prompts_dismissed'] += stats['prompts_dismissed']
+            aggregate_stats['conditions_completed'] += len(participant.get('completedConditions', []))
+
+        return jsonify({
+            'success': True,
+            'data': {
+                'participants': participant_stats,
+                'aggregate': aggregate_stats,
+                'filter': status_filter
+            }
+        }), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error getting all stats: {str(e)}")
         return jsonify({'error': 'Internal server error', 'message': str(e)}), 500
