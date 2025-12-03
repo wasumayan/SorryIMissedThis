@@ -177,7 +177,7 @@ If the automated setup fails:
 
 The research team can access study metrics using:
 ```
-http://localhost:5002/api/study/stats/all?password=research2024
+http://localhost:5002/api/study/stats/all?password=password
 ```
 
 This shows ONLY anonymized participant IDs and usage statistics, NOT your personal messages or contact information.
