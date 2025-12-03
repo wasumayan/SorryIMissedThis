@@ -1,261 +1,275 @@
 # Sorry I Missed This (SIMT)
 
-A beautiful relationship management application that helps you nurture your connections through AI-powered insights and thoughtful prompts.
+## What is SIMT?
 
-## 🌳 What is SIMT?
+SIMT is a relationship management application that helps you stay connected with important people in your life through your iMessage conversations. It provides AI-powered conversation prompts to help you reach out to friends and family.
 
-SIMT visualizes your relationships as a living grove, with you as the gardener at the center. Each relationship is represented as a leaf on a branch, with visual indicators showing:
+## System Requirements
 
-- **Health Status**: Healthy (green), Attention (orange), Dormant (pink), At Risk (brown)
-- **Branch Thickness**: Relationship closeness
-- **Distance from Center**: Recency of contact
-- **Leaf Size**: Interaction frequency
+- **macOS 10.15 or later** (required for iMessage integration)
+- At least 2GB of free disk space
+- Internet connection
+- Active iMessage account
 
-## ✨ Key Features
+## Quick Setup (Recommended)
 
-### 🎨 Beautiful Grove Visualization
-- Interactive tree-of-life metaphor
-- Real-time relationship health indicators
-- Intuitive visual language for relationship status
+### Step 1: Download the Application
 
-### 🤖 AI-Powered Insights
-- Conversation analysis and sentiment tracking
-- Personalized message prompts
-- Relationship health recommendations
-- Smart follow-up suggestions
+Open Terminal (Applications > Utilities > Terminal) and run:
 
-### 📱 Multi-Platform Integration
-- WhatsApp Web integration
-- Telegram support
-- Privacy-first local processing
-- Optional cloud sync
-
-### 📊 Analytics & Trends
-- Relationship health over time
-- Communication patterns
-- Growth rings visualization
-- Topic diversity tracking
-
-### 📅 Smart Scheduling
-- Automated relationship maintenance
-- Catch-up session planning
-- Calendar integration
-- Priority-based suggestions
-
-## 🏗️ Architecture
-
-### Frontend (React + TypeScript)
-- **Framework**: React 18 with Vite
-- **UI Library**: Radix UI + Tailwind CSS
-- **State Management**: React hooks
-- **Styling**: Custom design system with nature metaphors
-
-### Backend (Python + Flask)
-- **Runtime**: Python 3.9+
-- **Framework**: Flask
-- **Database**: Azure Cosmos DB (MongoDB-compatible)
-- **Authentication**: Token-based sessions
-- **AI Integration**: Azure OpenAI (GPT-4o-mini)
-
-### Cloud Infrastructure (Azure)
-- **App Service**: Host backend API
-- **Cosmos DB**: MongoDB-compatible database
-- **Storage Account**: File storage
-- **Key Vault**: Secret management
-- **CDN**: Static asset delivery
-
-## 🚀 Quick Start
-
-### Prerequisites
-- Node.js 18+
-- MongoDB (local or Azure Cosmos DB)
-- OpenAI API key
-- Azure account (for production)
-
-### 1. Clone the Repository
 ```bash
-git clone <repository-url>
+git clone https://github.com/YOUR-REPO-URL/SorryIMissedThis.git
 cd SorryIMissedThis
 ```
 
-### 2. Backend Setup
+### Step 2: Run the Setup Script
+
+Simply run our automated setup script:
+
+```bash
+./setup.sh
+```
+
+This script will:
+- Check and install required software (Python 3.9+, Node.js 18+)
+- Set up the backend server
+- Set up the frontend application
+- Set up the iMessage integration
+- Create convenient launch scripts
+
+The setup takes about 5-10 minutes depending on your internet connection.
+
+### Step 3: Start the Application
+
+After setup completes, you can start the application by either:
+
+**Option A: Double-click to start (easiest)**
+- Find `start-all.command` in the SorryIMissedThis folder
+- Double-click it
+- This will automatically open 2-3 terminal windows with all services running
+
+**Option B: Start manually**
+
+Open separate terminal windows and run:
+```bash
+# Terminal 1 - Backend
+./start-backend.sh
+
+# Terminal 2 - Frontend
+./start-frontend.sh
+
+# Terminal 3 - iMessage Bridge (optional, only if you configured Photon)
+./start-photon.sh
+```
+
+**Note:** You only need 2 terminals (backend + frontend) to use the app. The photon-server (Terminal 3) is only needed if you want iMessage integration. See "iMessage Integration Setup" section below.
+
+### Step 4: Access the Application
+
+Once all services are running, open your browser to:
+```
+http://localhost:5173
+```
+
+You should see the SIMT welcome page.
+
+## Creating Your Account
+
+1. Enter your Name, then hit "Continue"
+2. Hit the "Connect to iMessage" button
+3. Select Chats Manually (15) then hit "Continue"
+4. Click "Get Started" 
+5. Click "Enroll in the Study"
+6. Follow the study 
+
+
+## Using the Application
+
+### Daily Usage
+
+During the study, you will:
+
+1. Use the application to manage your relationships
+2. Connect your iMessage to sync conversations
+3. Receive AI-generated prompts for reaching out to contacts
+4. Complete brief surveys at the end of each study phase
+5. The study consists of 3 phases, each lasting 1 day
+
+### What Gets Tracked
+
+- Number of messages you send
+- How often you interact with AI prompts
+- Whether you accept, edit, or dismiss suggestions
+- Your survey responses
+
+### What Does NOT Get Tracked
+
+- The actual content of your messages
+- Personal information about your contacts
+- Any data outside the SIMT application
+
+## iMessage Integration Setup
+
+To use iMessage features with SIMT:
+
+1. **Sign up for Photon** at [photon.codes](https://photon.codes)
+2. Follow their setup instructions to connect your Mac
+3. Get your Photon server URL (e.g., `yourname.imsgd.photon.codes`)
+4. Edit `photon-server/.env` and add your URL:
+   ```
+   PHOTON_SERVER_URL=https://yourname.imsgd.photon.codes
+   ```
+5. Restart the photon server
+
+For detailed iMessage setup instructions, see `photon-server/README.md`
+
+## Troubleshooting
+
+### Setup script fails
+
+If the automated setup fails:
+- Make sure you have a stable internet connection
+- Try running `./setup.sh` again
+- Contact the research team if issues persist
+
+### Application won't start
+
+**Backend won't start:**
+- Check that port 5002 is not in use by another application
+- Make sure you're in the correct directory
+- Try: `cd backend && source venv/bin/activate && python run.py`
+
+**Frontend won't start:**
+- Check that port 5173 is not in use
+- Make sure Node.js is installed: `node --version`
+- Try: `cd FigmaFrontEnd && npm install && npm run dev`
+
+**iMessage integration not working:**
+- Make sure you've set up your Photon account
+- Check that `photon-server/.env` has your correct Photon URL
+- Verify the photon server is running on port 3001
+- See `photon-server/README.md` for detailed troubleshooting
+
+### Application won't load in browser
+
+1. Check that both backend and frontend terminals show no errors
+2. Try a different browser (Chrome, Firefox, Safari, Edge)
+3. Clear your browser cache
+4. Try accessing `http://127.0.0.1:5173` instead
+
+### Need to restart everything
+
+1. Press Ctrl+C in all terminal windows to stop services
+2. Run `./start-all.command` again
+   OR
+3. Run each start script manually in separate terminals
+
+## Privacy & Data
+
+### Your Data is Protected
+
+- All data is stored in a secure Azure database
+- Only aggregated, anonymized data will be used in research publications
+- You can request to delete your data at any time
+- The research team uses a password-protected admin interface to view anonymized study metrics
+
+### Admin Dashboard Access
+
+The research team can access study metrics using:
+```
+http://localhost:5002/api/study/stats/all?password=research2024
+```
+
+This shows ONLY anonymized participant IDs and usage statistics, NOT your personal messages or contact information.
+
+## Study Timeline
+
+1. **Day 1:** Phase 1 (Condition A)
+2. **Day 2:** Phase 2 (Condition B) + Survey for Phase 1
+3. **Day 3:** Phase 3 (Condition C) + Survey for Phase 2
+4. **Day 4:** Final Survey for Phase 3
+
+The system will automatically track which phase you're in and prompt you for surveys at the appropriate times.
+
+## Common Questions
+
+**Q: How long should I use the app each day?**
+A: Use it naturally as you would any relationship management tool. There's no minimum required time.
+
+**Q: Can I use my real contacts?**
+A: Yes, the system is designed for real-world use with your actual relationships.
+
+**Q: What if I need to skip a day?**
+A: Contact the research team. We understand that life happens.
+
+**Q: Can I quit the study?**
+A: Yes, participation is voluntary. Contact the research team to withdraw.
+
+**Q: Do I need to keep the terminal windows open?**
+A: Yes, while using the application. You can minimize them, but don't close them.
+
+## Support
+
+If you encounter any issues during installation or usage:
+
+**Contact the Research Team:**
+- Email: jm3230@princeton.edu
+
+## Uninstallation
+
+After the study is complete, you can uninstall by:
+
+1. Closing all terminal windows (Ctrl+C in each)
+2. Deleting the `SorryIMissedThis` folder
+3. (Optional) Uninstalling Python and Node.js if you don't need them:
+   ```bash
+   brew uninstall python@3.9 node
+   ```
+
+## Manual Setup (Advanced Users Only)
+
+If you prefer to set up manually or if the automatic script doesn't work:
+
+### Install Prerequisites
+
+```bash
+# Install Homebrew (if not already installed)
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Install Python and Node.js
+brew install python@3.9 node
+```
+
+### Backend Setup
+
 ```bash
 cd backend
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
-```
-
-Set environment variables (see `backend/README_TEAM.md` for details):
-```env
-AZURE_COSMOS_ENDPOINT=your-cosmos-endpoint
-AZURE_COSMOS_KEY=your-cosmos-key
-AZURE_OPENAI_ENDPOINT=your-openai-endpoint
-AZURE_OPENAI_KEY=your-openai-key
-FRONTEND_URL=http://localhost:5173
-```
-
-Start the backend:
-```bash
+cp .env.example .env
 python run.py
 ```
 
-### 3. Frontend Setup
+### Frontend Setup
+
 ```bash
 cd FigmaFrontEnd
 npm install
-```
-
-Create `.env.local`:
-```env
-VITE_API_URL=http://localhost:3000/api
-```
-
-Start the frontend:
-```bash
 npm run dev
 ```
 
-### 4. Access the Application
-- Frontend: http://localhost:5173
-- Backend API: http://localhost:5002 (default Flask port)
-- Health Check: http://localhost:5002/health
+### Photon Server Setup
 
-## 🏗️ Azure Deployment
-
-### 1. Set Up Azure Resources
 ```bash
-cd backend/scripts
-chmod +x setup-azure.sh
-./setup-azure.sh
+cd photon-server
+npm install
+# Edit .env with your Photon URL
+npm start
 ```
-
-### 2. Configure Secrets
-```bash
-# Add OpenAI API key
-az keyvault secret set --vault-name simt-keyvault --name 'OpenAI-API-Key' --value 'your-key'
-
-# Add Telegram bot token (optional)
-az keyvault secret set --vault-name simt-keyvault --name 'Telegram-Bot-Token' --value 'your-token'
-```
-
-### 3. Deploy Backend
-The GitHub Actions workflow will automatically deploy when you push to the main branch.
-
-### 4. Deploy Frontend
-Deploy the frontend to Azure Static Web Apps or your preferred hosting service.
-
-## 🔧 Development
-
-### Project Structure
-```
-SorryIMissedThis/
-├── backend/                 # Python Flask API
-│   ├── app/
-│   │   ├── models/         # Data models
-│   │   ├── routes/         # API routes
-│   │   ├── services/       # Business logic
-│   │   └── utils/          # Utilities
-│   ├── scripts/            # Deployment scripts
-│   ├── requirements.txt    # Python dependencies
-│   └── run.py             # Application entry point
-├── FigmaFrontEnd/          # React frontend
-│   ├── src/
-│   │   ├── components/     # React components
-│   │   ├── services/       # API client
-│   │   ├── constants/      # Constants files
-│   │   └── styles/         # CSS and styling
-│   └── package.json
-└── README.md
-```
-
-### API Endpoints
-
-#### Authentication
-- `POST /api/auth/register` - Create new account
-- `POST /api/auth/login` - Sign in
-- `GET /api/auth/me` - Get current user
-- `POST /api/auth/logout` - Sign out
-
-#### Contacts
-- `GET /api/contacts` - List contacts with filters
-- `POST /api/contacts` - Create new contact
-- `PUT /api/contacts/:id` - Update contact
-- `DELETE /api/contacts/:id` - Delete contact
-
-#### AI Features
-- `POST /api/ai/analyze-conversation` - Analyze conversation
-- `POST /api/ai/generate-prompts` - Generate message prompts
-- `GET /api/ai/suggestions/daily` - Get daily suggestions
-
-#### Analytics
-- `GET /api/analytics/overview` - Get analytics overview
-- `GET /api/analytics/contacts/:id` - Contact-specific analytics
-- `GET /api/analytics/trends` - Relationship trends
-
-### Database Schema
-
-#### Users
-```typescript
-{
-  email: string;
-  password: string; // hashed
-  name: string;
-  preferences: {
-    privacy: { localOnly: boolean; cloudSync: boolean; dataRetention: number };
-    notifications: { email: boolean; push: boolean; frequency: string };
-    ai: { promptStyle: string; autoAnalysis: boolean };
-  };
-  connectedPlatforms: {
-    whatsapp: { connected: boolean; sessionId?: string };
-    telegram: { connected: boolean; userId?: string };
-  };
-}
-```
-
-#### Contacts
-```typescript
-{
-  userId: ObjectId;
-  name: string;
-  category: 'family' | 'friends' | 'work';
-  status: 'healthy' | 'attention' | 'dormant' | 'wilted';
-  metrics: {
-    totalMessages: number;
-    lastContact: Date;
-    reciprocity: number;
-    interactionFrequency: number;
-  };
-  aiAnalysis: {
-    personality: string;
-    communicationStyle: string;
-    preferredTopics: string[];
-  };
-}
-```
-
-## 🔒 Privacy & Security
-
-### Data Protection
-- **Local-First**: All data processed locally by default
-- **Encryption**: Data encrypted at rest and in transit
-- **No Message Sending**: AI suggests but never sends messages
-- **User Control**: One-click data purge available
-
-### Security Features
-- JWT-based authentication
-- Rate limiting on API endpoints
-- CORS protection
-- Input validation and sanitization
-- Secure secret management with Azure Key Vault
-
-## 🙏 Acknowledgments
-
-- Design inspiration from nature and relationship psychology
-- UI components from Radix UI
-- Icons from Lucide React
-- AI capabilities powered by OpenAI
 
 ---
 
-**Made with ❤️ by Wasu Industries**
+**Thank you for participating in our research!**
+
+We appreciate your time and contribution to understanding how AI can help people maintain meaningful relationships.

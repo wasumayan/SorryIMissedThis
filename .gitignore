@@ -1,17 +1,32 @@
+# System files
 .DS_Store
+*.swp
+*.swo
+*~
+
+# Dependencies
 node_modules/
 backend/node_modules/
 FigmaFrontEnd/node_modules/
+
+# Environment files
 .env
 backend/.env
 FigmaFrontEnd/.env.local
+
+# Build outputs
 dist/
 build/
 coverage/
+
+# Application data
 sessions/
+
+# Logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+*.log
 
 # Python
 __pycache__/
@@ -24,13 +39,33 @@ backend/env/
 *.egg-info/
 .pytest_cache/
 
-PRE_PUSH_CHECKLIST.md
-sample_whatsapp_chat.txt
-USER_JOURNEY_TEST_GUIDE.md
+# Development documentation (not for participants)
+# These files are internal development notes
+*_SUMMARY.md
+*_IMPLEMENTATION*.md
+*_ROADMAP.md
+*_REPORT.md
+*_ANALYSIS*.md
+*_PLAN.md
+*_DIAGNOSTIC.md
 CHANGELOG.md
-SCHEDULE_ENDPOINTS_DIAGNOSTIC.md
-STUDY_COMPLETE_SUMMARY.md
-STUDY_IMPLEMENTATION_COMPLETE.md
-STUDY_IMPLEMENTATION_ROADMAP.md
+DEPLOYMENT.md
+SETUP_GUIDE.md
+STATUS_REPORT.md
+PRE_PUSH_CHECKLIST.md
+USER_JOURNEY_TEST_GUIDE.md
 FIXES_APPLIED.md
 PURGE_DATA_IMPLEMENTATION.md
+!photon-server/QUICKSTART.md
+!photon-server/README.md
+
+# Sample/test files
+sample_*.txt
+test_*.txt
+*.pdf
+roadmap*.pdf
+
+# IDE specific
+.vscode/
+.idea/
+*.sublime-*
