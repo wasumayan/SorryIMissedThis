@@ -18,7 +18,7 @@ SIMT is a relationship management application that helps you stay connected with
 Open Terminal (Applications > Utilities > Terminal) and run:
 
 ```bash
-git clone https://github.com/YOUR-REPO-URL/SorryIMissedThis.git
+git clone https://github.com/wasumayan/SorryIMissedThis
 cd SorryIMissedThis
 ```
 
