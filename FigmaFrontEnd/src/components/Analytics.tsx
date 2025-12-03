@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
-import { ScrollArea } from "./ui/scroll-area";
 import { ArrowLeft, TrendingUp, Users, MessageSquare, Heart } from "lucide-react";
 import { apiClient, User, AnalyticsOverview, TrendsData } from "../services/api";
+import { ScrollArea } from "./ui/scroll-area";
+import { ANALYTICS_CONSTANTS } from "../constants/analytics";
 
 interface AnalyticsProps {
   user: User;
@@ -21,14 +22,16 @@ export function Analytics({ user, onBack }: AnalyticsProps) {
       try {
         setIsLoading(true);
 
-        // Fetch overview
-        const overviewResponse = await apiClient.getAnalyticsOverview(user.id, period);
+        // OPTIMIZATION: Fetch both in parallel instead of sequentially
+        const [overviewResponse, trendsResponse] = await Promise.all([
+          apiClient.getAnalyticsOverview(user.id, period),
+          apiClient.getTrends(user.id, period)
+        ]);
+
         if (overviewResponse.success && overviewResponse.data) {
           setOverview(overviewResponse.data.overview);
         }
 
-        // Fetch trends
-        const trendsResponse = await apiClient.getTrends(user.id, period);
         if (trendsResponse.success && trendsResponse.data) {
           setTrends(trendsResponse.data.trends);
         }
@@ -59,9 +62,10 @@ export function Analytics({ user, onBack }: AnalyticsProps) {
           </p>
         </div>
       </div>
+      <ScrollArea className="h-full">
 
-      <div className="flex-1 overflow-hidden">
-        <ScrollArea className="h-full">
+      <div className="flex-1 overflow-hidden min-h-0">
+        <div className="h-full overflow-y-auto scrollable">
           <div className="max-w-6xl mx-auto p-6 space-y-6">
           {/* Stats Cards */}
           {isLoading ? (
@@ -70,7 +74,7 @@ export function Analytics({ user, onBack }: AnalyticsProps) {
             </div>
           ) : overview ? (
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <Card className="p-6 border-2 hover:shadow-lg transition-shadow" style={{ borderColor: '#06b6d420' }}>
+              <Card className="p-6 border-2 hover:shadow-lg transition-shadow" style={{ borderColor: ANALYTICS_CONSTANTS.CARD_BORDER_COLORS.MESSAGES }}>
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-primary/50 flex items-center justify-center">
                     <MessageSquare className="w-6 h-6 text-white" />
@@ -84,9 +88,9 @@ export function Analytics({ user, onBack }: AnalyticsProps) {
                 </div>
               </Card>
 
-              <Card className="p-6 border-2 hover:shadow-lg transition-shadow" style={{ borderColor: '#10b98120' }}>
+              <Card className="p-6 border-2 hover:shadow-lg transition-shadow" style={{ borderColor: ANALYTICS_CONSTANTS.CARD_BORDER_COLORS.RESPONSE_TIME }}>
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[#10b981] to-[#10b981]/50 flex items-center justify-center">
+                  <div className="w-12 h-12 rounded-full flex items-center justify-center" style={{ background: `linear-gradient(to bottom right, ${ANALYTICS_CONSTANTS.GRADIENT_COLORS.RESPONSE_TIME.FROM}, ${ANALYTICS_CONSTANTS.GRADIENT_COLORS.RESPONSE_TIME.TO}50)` }}>
                     <Heart className="w-6 h-6 text-white" />
                   </div>
                   <div>
@@ -98,9 +102,9 @@ export function Analytics({ user, onBack }: AnalyticsProps) {
                 </div>
               </Card>
 
-              <Card className="p-6 border-2 hover:shadow-lg transition-shadow" style={{ borderColor: '#8b5cf620' }}>
+              <Card className="p-6 border-2 hover:shadow-lg transition-shadow" style={{ borderColor: ANALYTICS_CONSTANTS.CARD_BORDER_COLORS.CONTACTS }}>
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[#8b5cf6] to-[#8b5cf6]/50 flex items-center justify-center">
+                  <div className="w-12 h-12 rounded-full flex items-center justify-center" style={{ background: `linear-gradient(to bottom right, ${ANALYTICS_CONSTANTS.GRADIENT_COLORS.CONTACTS.FROM}, ${ANALYTICS_CONSTANTS.GRADIENT_COLORS.CONTACTS.TO}50)` }}>
                     <Users className="w-6 h-6 text-white" />
                   </div>
                   <div>
@@ -133,21 +137,26 @@ export function Analytics({ user, onBack }: AnalyticsProps) {
             <h3 className="mb-6">Weekly Activity Rings</h3>
             {weeks.length > 0 ? (
               <div className="flex items-center justify-center py-8">
-                <svg width="400" height="400" viewBox="0 0 400 400">
+                <svg 
+                  width={ANALYTICS_CONSTANTS.SVG_SIZE} 
+                  height={ANALYTICS_CONSTANTS.SVG_SIZE} 
+                  viewBox={`0 0 ${ANALYTICS_CONSTANTS.SVG_SIZE} ${ANALYTICS_CONSTANTS.SVG_SIZE}`}
+                >
                 {/* Concentric circles representing weeks */}
                 {weeks.map((week, index) => {
-                  const radius = 60 + index * 40;
+                  const radius = ANALYTICS_CONSTANTS.RING_START_RADIUS + index * ANALYTICS_CONSTANTS.RING_INCREMENT;
                   const circumference = 2 * Math.PI * radius;
                   const intensity = week.messages / maxMessages;
-                  const strokeWidth = 25;
+                  const strokeWidth = ANALYTICS_CONSTANTS.RING_STROKE_WIDTH;
                   const offset = circumference * (1 - intensity);
+                  const opacity = ANALYTICS_CONSTANTS.RING_OPACITY_MIN + intensity * (ANALYTICS_CONSTANTS.RING_OPACITY_MAX - ANALYTICS_CONSTANTS.RING_OPACITY_MIN);
 
                   return (
                     <g key={week._id.week}>
                       {/* Background ring */}
                       <circle
-                        cx="200"
-                        cy="200"
+                        cx={ANALYTICS_CONSTANTS.SVG_CENTER}
+                        cy={ANALYTICS_CONSTANTS.SVG_CENTER}
                         r={radius}
                         fill="none"
                         stroke="var(--muted)"
@@ -156,8 +165,8 @@ export function Analytics({ user, onBack }: AnalyticsProps) {
                       />
                       {/* Activity ring */}
                       <circle
-                        cx="200"
-                        cy="200"
+                        cx={ANALYTICS_CONSTANTS.SVG_CENTER}
+                        cy={ANALYTICS_CONSTANTS.SVG_CENTER}
                         r={radius}
                         fill="none"
                         stroke="var(--primary)"
@@ -165,13 +174,13 @@ export function Analytics({ user, onBack }: AnalyticsProps) {
                         strokeDasharray={circumference}
                         strokeDashoffset={offset}
                         strokeLinecap="round"
-                        transform="rotate(-90 200 200)"
-                        opacity={0.7 + intensity * 0.3}
+                        transform={`rotate(-90 ${ANALYTICS_CONSTANTS.SVG_CENTER} ${ANALYTICS_CONSTANTS.SVG_CENTER})`}
+                        opacity={opacity}
                       />
                       {/* Label */}
                       <text
-                        x="200"
-                        y={200 - radius - 20}
+                        x={ANALYTICS_CONSTANTS.SVG_CENTER}
+                        y={ANALYTICS_CONSTANTS.SVG_CENTER - radius - 20}
                         textAnchor="middle"
                         fill="var(--muted-foreground)"
                         fontSize="11"
@@ -183,8 +192,22 @@ export function Analytics({ user, onBack }: AnalyticsProps) {
                   );
                 })}
                 {/* Center */}
-                <circle cx="200" cy="200" r="35" fill="var(--primary)" opacity="0.1" />
-                <text x="200" y="200" textAnchor="middle" fill="var(--foreground)" fontSize="14" fontWeight="600" dy="5">
+                <circle 
+                  cx={ANALYTICS_CONSTANTS.SVG_CENTER} 
+                  cy={ANALYTICS_CONSTANTS.SVG_CENTER} 
+                  r={ANALYTICS_CONSTANTS.CENTER_CIRCLE_RADIUS} 
+                  fill="var(--primary)" 
+                  opacity="0.1" 
+                />
+                <text 
+                  x={ANALYTICS_CONSTANTS.SVG_CENTER} 
+                  y={ANALYTICS_CONSTANTS.SVG_CENTER} 
+                  textAnchor="middle" 
+                  fill="var(--foreground)" 
+                  fontSize="14" 
+                  fontWeight="600" 
+                  dy="5"
+                >
                   {weeks.length} {weeks.length === 1 ? 'Week' : 'Weeks'}
                 </text>
               </svg>
@@ -214,7 +237,7 @@ export function Analytics({ user, onBack }: AnalyticsProps) {
                   Relationships you've rekindled this month
                 </p>
                 <div className="space-y-2">
-                  {trends.revivedConnections.slice(0, 2).map((contact, index) => (
+                  {trends.revivedConnections.slice(0, ANALYTICS_CONSTANTS.MAX_REVIVED_DISPLAYED).map((contact, index) => (
                     <div key={index} className="flex items-center justify-between">
                       <span style={{ fontSize: '0.875rem' }}>{contact.name}</span>
                       <span className="text-[#10b981]" style={{ fontSize: '0.875rem' }}>
@@ -237,7 +260,7 @@ export function Analytics({ user, onBack }: AnalyticsProps) {
                   Relationship health distribution
                 </p>
                 <div className="space-y-2">
-                  {trends.healthTrends.slice(0, 2).map((trend, index) => (
+                  {trends.healthTrends.slice(0, ANALYTICS_CONSTANTS.MAX_TRENDS_DISPLAYED).map((trend, index) => (
                     <div key={index} className="flex items-center justify-between">
                       <span style={{ fontSize: '0.875rem' }} className="capitalize">{trend._id}</span>
                       <span className="text-muted-foreground" style={{ fontSize: '0.875rem' }}>
@@ -257,7 +280,7 @@ export function Analytics({ user, onBack }: AnalyticsProps) {
                   Recent communication patterns
                 </p>
                 <div className="space-y-2">
-                  {trends.communicationTrends.slice(0, 2).map((trend, index) => (
+                  {trends.communicationTrends.slice(0, ANALYTICS_CONSTANTS.MAX_TRENDS_DISPLAYED).map((trend, index) => (
                     <div key={index} className="flex items-center justify-between">
                       <span style={{ fontSize: '0.875rem' }}>
                         {new Date(trend._id.year, trend._id.month - 1).toLocaleDateString('en-US', { month: 'short' })}
@@ -273,42 +296,46 @@ export function Analytics({ user, onBack }: AnalyticsProps) {
           )}
 
           {/* Topic Diversity */}
+          {overview && overview.topicDiversity && overview.topicDiversity.length > 0 && (
           <Card className="p-6">
             <h3 className="mb-4">Conversation Topics</h3>
             <p className="text-muted-foreground mb-6" style={{ fontSize: '0.875rem' }}>
               Diversity of conversation themes this month
             </p>
             <div className="space-y-3">
-              {[
-                { topic: "Work & Career", count: 28, color: "#0d9488" },
-                { topic: "Family & Personal", count: 35, color: "#10b981" },
-                { topic: "Hobbies & Interests", count: 18, color: "#3b82f6" },
-                { topic: "Planning & Events", count: 22, color: "#8b5cf6" },
-                { topic: "Casual Check-ins", count: 41, color: "#06b6d4" },
-              ].map((item) => (
-                <div key={item.topic}>
+                {overview.topicDiversity.map((item: any, index: number) => {
+                  const maxCount = Math.max(...overview.topicDiversity.map((t: any) => t.count || 0), 1);
+                  const topicName = item._id || item.topic || `Topic ${index + 1}`;
+                  const count = item.count || 0;
+                  const color = ANALYTICS_CONSTANTS.TOPIC_COLORS[index % ANALYTICS_CONSTANTS.TOPIC_COLORS.length];
+                  
+                  return (
+                    <div key={index}>
                   <div className="flex items-center justify-between mb-2">
-                    <span style={{ fontSize: '0.875rem' }}>{item.topic}</span>
+                        <span style={{ fontSize: '0.875rem' }}>{topicName}</span>
                     <span className="text-muted-foreground" style={{ fontSize: '0.875rem' }}>
-                      {item.count} conversations
+                          {count} conversations
                     </span>
                   </div>
                   <div className="h-2 bg-muted rounded-full overflow-hidden">
                     <div
                       className="h-full rounded-full transition-all"
                       style={{
-                        width: `${(item.count / 41) * 100}%`,
-                        backgroundColor: item.color,
+                            width: `${(count / maxCount) * 100}%`,
+                            backgroundColor: color,
                       }}
                     />
                   </div>
                 </div>
-              ))}
+                  );
+                })}
             </div>
           </Card>
+          )}
         </div>
-        </ScrollArea>
+        </div>
       </div>
+      </ScrollArea>
     </div>
   );
 }

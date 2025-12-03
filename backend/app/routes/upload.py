@@ -12,6 +12,7 @@ from werkzeug.utils import secure_filename
 from app.services.chat_parser import ChatParser
 from app.services.azure_storage import storage
 from app.services.ai_service import AIService
+from app.utils.helpers import get_partner_name
 
 
 upload_bp = Blueprint('upload', __name__)
@@ -206,18 +207,17 @@ def upload_transcript():
                         f"Failed to save conversation with {conversation.partner_name}"
                     )
 
-            # TODO: Generate initial prompts for each conversation
-            # This requires implementing prompt storage in azure_storage.py
+            # Generate initial prompts for each conversation
             prompts_generated = 0
-            # for conversation in all_conversations:
-            #     try:
-            #         prompts = ai_service.generate_prompts(conversation, num_prompts=3)
-            #         for prompt in prompts:
-            #             prompt.conversation_id = conversation.conversation_id
-            #             storage.create_prompt(prompt.to_dict())
-            #         prompts_generated += len(prompts)
-            #     except Exception as e:
-            #         current_app.logger.error(f"Error generating prompts: {str(e)}")
+            for conversation in all_conversations:
+                try:
+                    prompts = ai_service.generate_prompts(conversation, num_prompts=3)
+                    for prompt in prompts:
+                        prompt.conversation_id = conversation.conversation_id
+                        storage.save_prompt(prompt)
+                    prompts_generated += len(prompts)
+                except Exception as e:
+                    current_app.logger.error(f"Error generating prompts: {str(e)}")
 
             # Prepare response
             total_messages = sum(len(c.messages) for c in all_conversations)
@@ -283,7 +283,7 @@ def get_upload_status(user_id):
             if isinstance(c, dict):
                 metrics = c.get('metrics', {})
                 conversation_summary.append({
-                    'partner_name': c.get('partner_name', 'Unknown'),
+                    'partner_name': get_partner_name(c) or c.get('partner_name') or 'Unknown',
                     'total_messages': metrics.get('total_messages', 0),
                     'days_since_contact': metrics.get('days_since_contact'),
                     'health': 'healthy'  # Simplified for now

@@ -44,6 +44,10 @@ class Config:
     UPLOAD_FOLDER = 'uploads'
     ALLOWED_EXTENSIONS = {'txt', 'zip'}
     
+    # iMessage Integration (Photon)
+    PHOTON_SERVER_URL = os.getenv('PHOTON_SERVER_URL', '')
+    PHOTON_API_KEY = os.getenv('PHOTON_API_KEY', '')
+    
     # Analytics
     DORMANT_DAYS_THRESHOLD = int(os.getenv('DORMANT_DAYS_THRESHOLD', 14))
     CONTEXT_WINDOW_MESSAGES = int(os.getenv('CONTEXT_WINDOW_MESSAGES', 100))

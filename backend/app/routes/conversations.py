@@ -27,12 +27,12 @@ def get_conversations():
     """
     
     try:
-        user_id = request.args.get('user_id')
+        user_id = request.args.get('userId') or request.args.get('user_id')  # Support both formats
         category = request.args.get('category')
         limit = int(request.args.get('limit', 100))
         
         if not user_id:
-            return jsonify({'error': 'user_id parameter is required'}), 400
+            return jsonify({'error': 'userId parameter is required'}), 400
         
         conversations = storage.get_user_conversations(user_id, category=category, limit=limit)
         
@@ -62,7 +62,8 @@ def get_conversations():
         return jsonify({
             'user_id': user_id,
             'total': len(formatted_conversations),
-            'conversations': formatted_conversations
+            'conversations': formatted_conversations,
+            'hasMore': len(formatted_conversations) >= limit
         }), 200
     
     except ValueError:
@@ -71,6 +72,76 @@ def get_conversations():
     except Exception as e:
         current_app.logger.error(f"Error getting conversations: {str(e)}")
         return jsonify({'error': 'Error retrieving conversations'}), 500
+
+
+@conversations_bp.route('/<conversation_id>/summary', methods=['GET'])
+def get_conversation_summary(conversation_id):
+    """
+    Get conversation summary (AI-generated)
+    
+    Query Parameters:
+        - userId: User ID (required)
+    
+    Returns:
+        Conversation summary with sentiment, topics, and suggestions
+    """
+    try:
+        user_id = request.args.get('userId') or request.args.get('user_id')
+        
+        if not user_id:
+            return jsonify({'error': 'userId parameter is required'}), 400
+        
+        conversation = storage.get_conversation(conversation_id, user_id)
+        
+        if not conversation:
+            return jsonify({'error': 'Conversation not found'}), 404
+        
+        # For now, return a simple summary based on metadata
+        # Full AI summary would require fetching messages from iMessage (not stored in cloud)
+        metrics = conversation.get('metrics', {})
+
+        # Simple summary based on available metadata
+        days_since = metrics.get('days_since_contact', 0)
+        total_messages = metrics.get('total_messages', 0)
+        reciprocity = metrics.get('reciprocity', 0.5)
+
+        summary_text = f"You have exchanged {total_messages} messages. "
+        if days_since == 0:
+            summary_text += "Last contact was today. "
+        elif days_since == 1:
+            summary_text += "Last contact was yesterday. "
+        else:
+            summary_text += f"Last contact was {days_since} days ago. "
+
+        if reciprocity > 0.6:
+            summary_text += "The conversation is well-balanced."
+        elif reciprocity < 0.4:
+            summary_text += "You may want to reach out more often."
+        else:
+            summary_text += "The conversation has reasonable balance."
+
+        analysis = {
+            'summary': summary_text,
+            'sentiment': {'overall': 'neutral'},
+            'topics': [],
+            'followUpSuggestions': []
+        }
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'summary': {
+                    'summary': analysis.get('summary', ''),
+                    'sentiment': analysis.get('sentiment', {}).get('overall', 'neutral'),
+                    'keyTopics': [t.get('topic', '') for t in analysis.get('topics', [])],
+                    'followUpSuggestions': analysis.get('followUpSuggestions', [])
+                }
+            }
+        }), 200
+    
+    except Exception as e:
+        current_app.logger.error(f"Error getting conversation summary: {str(e)}")
+        return jsonify({'error': 'Internal server error', 'message': str(e)}), 500
 
 
 @conversations_bp.route('/<conversation_id>', methods=['GET'])
@@ -89,44 +160,49 @@ def get_conversation(conversation_id):
     try:
         include_messages = request.args.get('include_messages', 'false').lower() == 'true'
         message_limit = int(request.args.get('message_limit', 50))
-        
-        conversation = storage.get_conversation(conversation_id)
-        
+
+        # Get user_id from query params
+        user_id = request.args.get('userId') or request.args.get('user_id')
+
+        if not user_id:
+            # Try to extract user_id from conversation_id if it has the format user_id_platform
+            if '_' in conversation_id:
+                user_id = conversation_id.split('_')[0]
+            else:
+                return jsonify({'error': 'userId parameter is required'}), 400
+
+        conversation = storage.get_conversation(conversation_id, user_id)
+
         if not conversation:
             return jsonify({'error': 'Conversation not found'}), 404
-        
-        # Format conversation
+
+        # conversation is a dict from Cosmos DB, access it as a dict
+        metrics = conversation.get('metrics', {})
+
+        # Format conversation response
         response = {
-            'conversation_id': conversation.conversation_id,
-            'partner_name': conversation.partner_name,
-            'category': conversation.category,
-            'relationship_health': conversation.get_relationship_health(),
+            'conversation_id': conversation.get('conversationId') or conversation.get('conversation_id') or conversation.get('id'),
+            'partner_name': conversation.get('partnerName') or conversation.get('partner_name', 'Unknown'),
+            'category': conversation.get('category', 'friends'),
+            'relationship_health': conversation.get('status', 'healthy'),  # Already calculated in to_dict
             'metrics': {
-                'total_messages': conversation.metrics.total_messages,
-                'user_messages': conversation.metrics.user_messages,
-                'partner_messages': conversation.metrics.partner_messages,
-                'reciprocity': round(conversation.metrics.reciprocity, 2),
-                'days_since_contact': conversation.metrics.days_since_contact,
-                'avg_response_time': round(conversation.metrics.avg_response_time, 2) if conversation.metrics.avg_response_time else None,
-                'common_topics': conversation.metrics.common_topics
+                'total_messages': metrics.get('total_messages', 0),
+                'user_messages': metrics.get('user_messages', 0),
+                'partner_messages': metrics.get('partner_messages', 0),
+                'reciprocity': round(metrics.get('reciprocity', 0.5), 2),
+                'days_since_contact': metrics.get('days_since_contact', 0),
+                'avg_response_time': round(metrics.get('avg_response_time', 0), 2) if metrics.get('avg_response_time') else None,
+                'common_topics': metrics.get('common_topics', [])
             },
-            'last_message_time': conversation.metrics.last_message_time.isoformat() if conversation.metrics.last_message_time else None,
-            'created_at': conversation.created_at.isoformat(),
-            'updated_at': conversation.updated_at.isoformat()
+            'last_message_time': metrics.get('last_message_time'),  # Already ISO string from to_dict
+            'created_at': conversation.get('createdAt') or conversation.get('created_at'),
+            'updated_at': conversation.get('updatedAt') or conversation.get('updated_at')
         }
-        
-        # Include messages if requested
+
+        # Include messages if requested (but we don't store messages in cloud for privacy)
         if include_messages:
-            recent_messages = conversation.get_last_n_messages(message_limit)
-            response['messages'] = [
-                {
-                    'timestamp': msg.timestamp.isoformat(),
-                    'sender': msg.sender,
-                    'content': msg.content
-                }
-                for msg in reversed(recent_messages)  # Chronological order
-            ]
-        
+            response['messages'] = []  # Messages stay local only
+
         return jsonify(response), 200
     
     except ValueError:
@@ -195,17 +271,163 @@ def generate_new_prompts(conversation_id):
     try:
         data = request.get_json() or {}
         num_prompts = data.get('num_prompts', 3)
-        tone = data.get('tone', 'friendly')
-        
+        # Allow override, but default to conversation-specific tone
+        tone_override = data.get('tone')
+
+        # Get user_id from request body or query params
+        user_id = data.get('userId') or data.get('user_id') or request.args.get('userId') or request.args.get('user_id')
+
+        if not user_id:
+            # Try to extract user_id from conversation_id if it has the format user_id_platform
+            if '_' in conversation_id:
+                user_id = conversation_id.split('_')[0]
+            else:
+                return jsonify({'error': 'userId parameter is required'}), 400
+
         # Get conversation
-        conversation = storage.get_conversation(conversation_id)
+        conversation = storage.get_conversation(conversation_id, user_id)
         
         if not conversation:
             return jsonify({'error': 'Conversation not found'}), 404
         
-        # Generate prompts
+        # Determine tone: use override if provided, otherwise check user preferences, then conversation-specific tone
+        if tone_override:
+            tone = tone_override
+        else:
+            # Try to get tone from user preferences first (as per AI_PROMPT_GENERATION.md)
+            user_id = conversation.get('userId') if isinstance(conversation, dict) else getattr(conversation, 'user_id', None)
+            user_tone = None
+            if user_id:
+                try:
+                    user = storage.get_user_by_id(user_id)
+                    if user and isinstance(user, dict):
+                        user_tone = user.get('preferences', {}).get('ai', {}).get('promptStyle')
+                    elif user and hasattr(user, 'preferences'):
+                        user_tone = getattr(user.preferences, 'ai', {}).get('promptStyle') if hasattr(user.preferences, 'ai') else None
+                except Exception:
+                    pass  # Continue to fallback
+            
+            if user_tone:
+                tone = user_tone
+            else:
+                # Get conversation-specific tone (from conversation.tone or category-based default)
+                if isinstance(conversation, dict):
+                    tone = conversation.get('tone')
+                    if not tone:
+                        category = conversation.get('category', 'friends')
+                        category_tone_map = {'work': 'formal', 'family': 'friendly', 'friends': 'friendly'}
+                        tone = category_tone_map.get(category, 'friendly')
+                elif hasattr(conversation, 'get_tone'):
+                    tone = conversation.get_tone()
+                elif hasattr(conversation, 'tone') and conversation.tone:
+                    tone = conversation.tone
+                else:
+                    # Fallback to category-based default
+                    category = getattr(conversation, 'category', 'friends')
+                    category_tone_map = {'work': 'formal', 'family': 'friendly', 'friends': 'friendly'}
+                    tone = category_tone_map.get(category, 'friendly')
+        
+        # CONTEXT-AWARE: Fetch recent messages from iMessage service for AI analysis
+        # Messages are fetched fresh from iMessage (not stored in DB for privacy)
+        # but needed for context-aware prompt generation
+        from app.services.imessage_service import get_imessage_service
+        from app.models import Message, Conversation
+        from datetime import datetime, timezone
+        import asyncio
+        
+        # Get chatId from conversation
+        chat_id = None
+        if isinstance(conversation, dict):
+            chat_id = conversation.get('chatId') or conversation.get('chatGuid')
+        else:
+            chat_id = getattr(conversation, 'chatId', None) or getattr(conversation, 'chatGuid', None)
+        
+        # Fetch last 100 messages from iMessage for context
+        messages_for_ai = []
+        if chat_id:
+            try:
+                imessage_service = get_imessage_service()
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    # Fetch messages from iMessage service
+                    raw_messages = loop.run_until_complete(
+                        imessage_service.get_messages(chat_id, limit=100, offset=0)
+                    )
+                    
+                    # Convert to Message objects for AI analysis
+                    user_id = conversation.get('userId') if isinstance(conversation, dict) else getattr(conversation, 'user_id', '')
+                    for msg in raw_messages:
+                        try:
+                            msg_time = msg.get('date')
+                            if isinstance(msg_time, str):
+                                if msg_time.endswith('Z'):
+                                    msg_time = datetime.fromisoformat(msg_time.replace('Z', '+00:00'))
+                                else:
+                                    msg_time = datetime.fromisoformat(msg_time)
+                            elif isinstance(msg_time, (int, float)):
+                                msg_time = datetime.fromtimestamp(msg_time / 1000, tz=timezone.utc)
+                            else:
+                                msg_time = datetime.now(timezone.utc)
+                            
+                            is_from_me = msg.get('isFromMe', False)
+                            # Consistently use 'user' for user messages, partner_name for contact messages
+                            # This ensures AI can properly distinguish who said what
+                            if is_from_me:
+                                sender = 'user'  # Consistent identifier for user messages
+                            else:
+                                # Get partner name from conversation
+                                partner_name = conversation.get('partnerName') if isinstance(conversation, dict) else getattr(conversation, 'partner_name', 'Contact')
+                                sender = partner_name
+                            
+                            content = msg.get('text') or ''
+                            
+                            if content:  # Only include messages with text for AI analysis
+                                messages_for_ai.append(Message(
+                                    message_id=msg.get('guid', ''),
+                                    timestamp=msg_time,
+                                    sender=sender,
+                                    content=content
+                                ))
+                        except Exception as e:
+                            current_app.logger.warning(f"Error converting message for AI: {str(e)}")
+                            continue
+                finally:
+                    loop.close()
+            except Exception as e:
+                current_app.logger.warning(f"Could not fetch messages from iMessage for context: {str(e)}")
+                # Continue without messages - AI will use metadata only
+        
+        # Convert conversation dict to Conversation object if needed
+        if isinstance(conversation, dict):
+            from app.models import ConversationMetrics
+            metrics = ConversationMetrics(
+                total_messages=conversation.get('messageCount', 0),
+                user_messages=0,  # Will be calculated from messages
+                partner_messages=0,  # Will be calculated from messages
+                reciprocity=conversation.get('reciprocity', 0.5),
+                avg_response_time=conversation.get('avgResponseTime'),
+                last_message_time=None,
+                days_since_contact=conversation.get('daysSinceContact'),
+                common_topics=[]
+            )
+            
+            conversation_obj = Conversation(
+                user_id=conversation.get('userId', ''),
+                partner_name=conversation.get('partnerName') or conversation.get('partner_name', 'Unknown'),
+                partner_id=conversation.get('partnerId') or conversation.get('partner_id', ''),
+                messages=messages_for_ai,  # Use fetched messages for AI context
+                metrics=metrics,
+                category=conversation.get('category', 'friends'),
+                conversation_id=conversation_id
+            )
+        else:
+            # Update existing Conversation object with fetched messages
+            conversation.messages = messages_for_ai
+        
+        # Generate prompts with context from fetched messages
         prompts = ai_service.generate_prompts(
-            conversation,
+            conversation_obj if isinstance(conversation, dict) else conversation,
             num_prompts=num_prompts,
             user_tone_preference=tone
         )
@@ -225,11 +447,16 @@ def generate_new_prompts(conversation_id):
                 'confidence': round(prompt.confidence_score, 2)
             })
         
-        return jsonify({
-            'conversation_id': conversation_id,
-            'prompts_generated': len(saved_prompts),
-            'prompts': saved_prompts
-        }), 201
+        response_data = {
+            'success': True,
+            'data': {
+                'conversation_id': conversation_id,
+                'prompts_generated': len(saved_prompts),
+                'prompts': saved_prompts
+            }
+        }
+        current_app.logger.info(f"Returning {len(saved_prompts)} prompts in response: {[p['text'][:30] for p in saved_prompts]}")
+        return jsonify(response_data), 201
     
     except Exception as e:
         current_app.logger.error(f"Error generating new prompts: {str(e)}", exc_info=True)
@@ -277,6 +504,75 @@ def update_conversation_category(conversation_id):
         return jsonify({'error': 'Error updating category'}), 500
 
 
+@conversations_bp.route('/<conversation_id>/tone', methods=['PUT'])
+def update_conversation_tone(conversation_id):
+    """
+    Update conversation-specific tone preference
+    
+    Body:
+        - tone: New tone (formal, friendly, playful)
+    
+    Returns:
+        Updated conversation
+    """
+    
+    try:
+        data = request.get_json()
+        
+        if not data or 'tone' not in data:
+            return jsonify({'error': 'tone is required in request body'}), 400
+        
+        new_tone = data['tone']
+        
+        if new_tone not in ['formal', 'friendly', 'playful']:
+            return jsonify({'error': 'tone must be one of: formal, friendly, playful'}), 400
+        
+        # Get user_id from query params or request body
+        user_id = request.args.get('userId') or request.args.get('user_id')  # Support both formats or request.get_json().get('userId') if request.get_json() else None
+        
+        # Try to get conversation to extract user_id if not provided
+        if not user_id:
+            # Try a cross-partition query to find the conversation
+            try:
+                # Query conversations container to find this conversation
+                query = "SELECT * FROM c WHERE c.id = @id"
+                parameters = [{"name": "@id", "value": conversation_id}]
+                conversations = list(storage.conversations_container.query_items(
+                    query=query,
+                    parameters=parameters,
+                    enable_cross_partition_query=True
+                ))
+                if conversations:
+                    user_id = conversations[0].get('userId') or conversations[0].get('user_id')
+            except Exception as e:
+                current_app.logger.error(f"Error finding conversation: {str(e)}")
+        
+        if not user_id:
+            return jsonify({'error': 'user_id is required. Provide as query param: ?user_id=...'}), 400
+        
+        # Get conversation
+        conversation = storage.get_conversation(conversation_id, user_id)
+        
+        if not conversation:
+            return jsonify({'error': 'Conversation not found'}), 404
+        
+        # Update tone using update_conversation method
+        success = storage.update_conversation(conversation_id, user_id, {'tone': new_tone})
+        
+        if not success:
+            return jsonify({'error': 'Failed to update conversation tone'}), 500
+        
+        return jsonify({
+            'success': True,
+            'conversation_id': conversation_id,
+            'tone': new_tone
+        }), 200
+    
+    except Exception as e:
+        current_app.logger.error(f"Error updating conversation tone: {str(e)}")
+        return jsonify({'error': 'Error updating tone'}), 500
+
+
 @conversations_bp.route('/<conversation_id>', methods=['DELETE'])
 def delete_conversation(conversation_id):
     """
@@ -290,7 +586,7 @@ def delete_conversation(conversation_id):
     """
     
     try:
-        user_id = request.args.get('user_id')
+        user_id = request.args.get('userId') or request.args.get('user_id')  # Support both formats
         
         if not user_id:
             return jsonify({'error': 'user_id parameter is required'}), 400
@@ -335,7 +631,7 @@ def get_dormant_conversations():
     """
     
     try:
-        user_id = request.args.get('user_id')
+        user_id = request.args.get('userId') or request.args.get('user_id')  # Support both formats
         days_threshold = int(request.args.get('days_threshold', 14))
         
         if not user_id:

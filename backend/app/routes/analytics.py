@@ -5,6 +5,7 @@ Analytics routes for user insights and trends
 from flask import Blueprint, request, jsonify, current_app
 from datetime import datetime, timedelta
 from app.services.azure_storage import storage
+from app.utils.helpers import get_partner_name
 
 analytics_bp = Blueprint('analytics', __name__)
 
@@ -22,7 +23,7 @@ def get_analytics_overview():
         Analytics overview with contact stats, conversation metrics, and trends
     """
     try:
-        user_id = request.args.get('userId')
+        user_id = request.args.get('userId') or request.args.get('user_id')  # Support both formats
         period = request.args.get('period', '30d')
 
         if not user_id:
@@ -148,7 +149,7 @@ def get_contact_analytics(contact_id):
         Detailed contact analytics including conversation history and patterns
     """
     try:
-        user_id = request.args.get('userId')
+        user_id = request.args.get('userId') or request.args.get('user_id')  # Support both formats
 
         if not user_id:
             return jsonify({'error': 'userId parameter is required'}), 400
@@ -202,7 +203,7 @@ def get_contact_analytics(contact_id):
                 'analytics': {
                     'contact': {
                         'id': conversation.get('id'),
-                        'name': conversation.get('partnerName', 'Unknown'),
+                        'name': get_partner_name(conversation) or 'Unknown',
                         'status': conversation.get('status', 'healthy'),
                         'metrics': {
                             'totalMessages': conversation.get('messageCount', 0),
@@ -239,7 +240,7 @@ def get_trends():
         Trend data including health trends, communication trends, and revived connections
     """
     try:
-        user_id = request.args.get('userId')
+        user_id = request.args.get('userId') or request.args.get('user_id')  # Support both formats
         period = request.args.get('period', '90d')
 
         if not user_id:
@@ -287,7 +288,7 @@ def get_trends():
                 # Check if was previously dormant (simplified logic)
                 revived_connections.append({
                     'id': conv.get('id'),
-                    'name': conv.get('partnerName', 'Unknown'),
+                    'name': get_partner_name(conv) or 'Unknown',
                     'status': conv.get('status', 'healthy'),
                     'metrics': {
                         'totalMessages': conv.get('messageCount', 0),
@@ -309,4 +310,32 @@ def get_trends():
 
     except Exception as e:
         current_app.logger.error(f"Error getting trends: {str(e)}")
+        return jsonify({'error': 'Internal server error', 'message': str(e)}), 500
+
+
+@analytics_bp.route('/prompt-usage', methods=['GET'])
+def get_prompt_usage_stats():
+    """
+    Get prompt usage statistics
+    
+    Query Parameters:
+        - userId: Optional user ID to filter by (if not provided, returns global stats)
+    
+    Returns:
+        Prompt usage statistics including total sent, edited, and edit rate
+    """
+    try:
+        user_id = request.args.get('userId') or request.args.get('user_id')  # Support both formats
+        
+        stats = storage.get_prompt_usage_stats(user_id=user_id)
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'prompt_usage': stats
+            }
+        }), 200
+    
+    except Exception as e:
+        current_app.logger.error(f"Error getting prompt usage stats: {str(e)}")
         return jsonify({'error': 'Internal server error', 'message': str(e)}), 500

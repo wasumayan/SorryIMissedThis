@@ -1,28 +1,59 @@
-import { useState, useEffect } from "react";
-import { GroveLeaf } from "./GroveLeaf";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { AnimatePresence } from "motion/react";
+import { GroveSVG } from "./GroveSVG";
 import { RelationshipStatsModal } from "./RelationshipStatsModal";
+import { ConditionSwitcher } from "./ConditionSwitcher";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
-import { ScrollArea } from "./ui/scroll-area";
-import { Droplet, Search, Calendar, TrendingUp } from "lucide-react";
-import { apiClient, User, Contact, DailySuggestion } from "../services/api";
+import { Droplet, Search, Calendar, TrendingUp, RefreshCw } from "lucide-react";
+import { apiClient, User, Contact, DailySuggestion, StudyParticipant } from "../services/api";
+import { toast } from "sonner";
+import { GROVE_CONSTANTS } from "../constants/grove";
 
 interface GroveDashboardProps {
   user: User;
   onContactSelect: (contact: Contact) => void;
   onViewAnalytics: () => void;
   onViewSchedule: () => void;
+  studyStatus?: StudyParticipant | null;
+  onStudyStatusUpdate?: (participant: StudyParticipant) => void;
 }
 
-export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewSchedule }: GroveDashboardProps) {
+export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewSchedule, studyStatus, onStudyStatusUpdate }: GroveDashboardProps) {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [activeFilter, setActiveFilter] = useState<string>("All");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [suggestions, setSuggestions] = useState<DailySuggestion[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const graphContainerRef = useRef<HTMLDivElement>(null);
+  const [graphDimensions, setGraphDimensions] = useState({ width: 1000, height: 800 });
+
+  // Update graph dimensions only when container size changes
+  useEffect(() => {
+    if (!graphContainerRef.current) return;
+
+    const updateDimensions = () => {
+      if (graphContainerRef.current) {
+        const rect = graphContainerRef.current.getBoundingClientRect();
+        setGraphDimensions({ width: rect.width, height: rect.height });
+      }
+    };
+
+    // Initial size
+    updateDimensions();
+
+    // Update on window resize
+    const resizeObserver = new ResizeObserver(updateDimensions);
+    resizeObserver.observe(graphContainerRef.current);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
 
   // Fetch contacts and suggestions on mount
   useEffect(() => {
@@ -31,19 +62,43 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
         setIsLoading(true);
 
         // Fetch contacts
+        console.log('[GROVE] Fetching contacts for user:', user.id);
         const contactsResponse = await apiClient.getContacts(user.id);
+        console.log('[GROVE] Contacts response:', {
+          success: contactsResponse.success,
+          hasData: !!contactsResponse.data,
+          contactsCount: contactsResponse.data?.contacts?.length || 0,
+          error: contactsResponse.error
+        });
 
         if (contactsResponse.success && contactsResponse.data) {
-          setContacts(contactsResponse.data.contacts);
+          const contactsList = contactsResponse.data.contacts || [];
+          console.log('[GROVE] Setting contacts:', contactsList.length, 'contacts');
+          setContacts(contactsList);
         } else {
           console.error('[GROVE] Failed to get contacts:', contactsResponse);
+          setContacts([]); // Ensure empty array on error
         }
 
         // Fetch daily suggestions
-        const suggestionsResponse = await apiClient.getDailySuggestions(user.id);
+        try {
+          const suggestionsResponse = await apiClient.getDailySuggestions(user.id);
+          console.log('[GROVE] Suggestions response:', {
+            success: suggestionsResponse.success,
+            hasData: !!suggestionsResponse.data,
+            suggestionsCount: suggestionsResponse.data?.suggestions?.length || 0,
+            error: suggestionsResponse.error
+          });
 
-        if (suggestionsResponse.success && suggestionsResponse.data) {
-          setSuggestions(suggestionsResponse.data.suggestions);
+          if (suggestionsResponse.success && suggestionsResponse.data) {
+            setSuggestions(suggestionsResponse.data.suggestions || []);
+          } else {
+            console.warn('[GROVE] Failed to get suggestions:', suggestionsResponse.error);
+            setSuggestions([]);
+          }
+        } catch (error) {
+          console.error('[GROVE] Error fetching suggestions:', error);
+          setSuggestions([]);
         }
       } catch (error) {
         console.error('[GROVE] Error fetching data:', error);
@@ -55,60 +110,24 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
     fetchData();
   }, [user.id]);
 
-  const filters = ["All", "Family", "Friends", "Work", "Dormant", "Priority"];
+  const filters = [...GROVE_CONSTANTS.FILTERS];
 
-  const filteredContacts = contacts.filter((contact) => {
-    const matchesSearch = contact.name.toLowerCase().includes(searchQuery.toLowerCase());
-    if (!matchesSearch) return false;
+  // OPTIMIZATION: Use useMemo to avoid recalculating filtered contacts on every render
+  const filteredContacts = useMemo(() => {
+    return contacts.filter((contact) => {
+      const matchesSearch = contact.name.toLowerCase().includes(searchQuery.toLowerCase());
+      if (!matchesSearch) return false;
 
-    if (activeFilter === "All") return true;
-    if (activeFilter === "Dormant") return contact.status === "dormant" || contact.status === "wilted";
-    if (activeFilter === "Priority") return contact.status === "attention" || contact.status === "wilted";
-    return contact.category === activeFilter.toLowerCase();
-  });
-
-  // Layout contacts in a tree-like pattern with variable branch lengths
-  const layoutContacts = (contacts: Contact[]) => {
-    const centerX = 500;
-    const centerY = 350;
-    const categoryAngles: Record<string, number> = {
-      family: -70,
-      friends: 0,
-      work: 70
-    };
-
-    return contacts.map((contact, i) => {
-      // Default to friends if category is unknown
-      const baseAngle = categoryAngles[contact.category] ?? categoryAngles.friends;
-      const spread = 35;
-      const angleOffset = (i % 5) * spread - spread * 2;
-      const angle = ((baseAngle + angleOffset) * Math.PI) / 180;
-
-      // Calculate recency from metrics
-      const recency = contact.recency || 0.5;
-
-      // Distance based on recency - more recent = shorter (closer)
-      const baseDistance = 120;
-      const maxDistance = 280;
-      const distance = baseDistance + (1 - recency) * (maxDistance - baseDistance);
-
-      return {
-        ...contact,
-        x: centerX + Math.cos(angle) * distance,
-        y: centerY + Math.sin(angle) * distance,
-        rotation: angle * (180 / Math.PI) + 90,
-        branchLength: distance,
-      };
+      if (activeFilter === "All") return true;
+      if (activeFilter === "Dormant") return contact.status === "dormant" || contact.status === "wilted";
+      if (activeFilter === "Priority") return contact.status === "attention" || contact.status === "wilted";
+      return contact.category === activeFilter.toLowerCase();
     });
-  };
+  }, [contacts, searchQuery, activeFilter]);
 
-  const layoutedContacts = layoutContacts(filteredContacts);
+  // Graph data calculation moved to GroveSVG component
+  
   const dormantCount = contacts.filter((c) => c.status === "dormant" || c.status === "wilted").length;
-  const attentionCount = contacts.filter((c) => c.status === "attention").length;
-
-  const handleLeafClick = (contact: Contact) => {
-    setSelectedContact(contact);
-  };
 
   const handleCloseModal = () => {
     setSelectedContact(null);
@@ -121,6 +140,70 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
     }
   };
 
+  const handleLeafClick = useCallback((contact: Contact) => {
+    console.log('[GROVE] Leaf clicked:', contact.name, contact.id);
+    console.log('[GROVE] Contact data:', contact);
+    // Directly navigate to conversation view
+    onContactSelect(contact);
+  }, [onContactSelect]);
+
+  // Rendering functions moved to GroveSVG component (pure SVG with D3.js)
+
+  // Update graph dimensions on resize
+  useEffect(() => {
+    const updateDimensions = () => {
+      const container = document.querySelector('.grove-container');
+      if (container) {
+        const rect = container.getBoundingClientRect();
+        setGraphDimensions({ width: rect.width, height: rect.height });
+      }
+    };
+    
+    updateDimensions();
+    window.addEventListener('resize', updateDimensions);
+    return () => window.removeEventListener('resize', updateDimensions);
+  }, []);
+
+  const handleSyncConversations = async () => {
+    setIsSyncing(true);
+    try {
+      console.log('[GROVE] Syncing iMessage conversations...');
+      const syncResponse = await apiClient.synciMessage(user.id);
+
+      if (syncResponse.success) {
+        console.log('[GROVE] Sync successful:', syncResponse.data);
+
+        // Refresh contacts and suggestions after sync
+        const contactsResponse = await apiClient.getContacts(user.id);
+        if (contactsResponse.success && contactsResponse.data) {
+          setContacts(contactsResponse.data.contacts);
+        }
+
+        const suggestionsResponse = await apiClient.getDailySuggestions(user.id);
+        if (suggestionsResponse.success && suggestionsResponse.data) {
+          setSuggestions(suggestionsResponse.data.suggestions);
+        }
+
+        const conversationCount = syncResponse.data?.data?.conversations_synced || 0;
+        toast.success(`Successfully synced ${conversationCount} conversation${conversationCount !== 1 ? 's' : ''}!`, {
+          description: 'Your grove has been updated with the latest data.',
+        });
+      } else {
+        console.error('[GROVE] Sync failed:', syncResponse.error);
+        toast.error('Sync failed', {
+          description: syncResponse.error || 'Unknown error occurred. Please try again.',
+        });
+      }
+    } catch (error) {
+      console.error('[GROVE] Error syncing:', error);
+      toast.error('Error syncing conversations', {
+        description: 'Please check your connection and try again.',
+      });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   return (
     <>
       <div className="flex h-full bg-gradient-to-br from-background via-secondary/20 to-accent/10">
@@ -129,7 +212,9 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
           {/* Header */}
           <div className="border-b bg-card/50 backdrop-blur-sm px-6 py-4 flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <h2 className="text-primary">{user.name}'s Grove</h2>
+              <h2 className="text-2xl font-bold bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
+                Welcome, {user.name || 'there'}!
+              </h2>
               <div className="flex gap-2">
                 {filters.map((filter) => (
                   <Button
@@ -145,6 +230,16 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
               </div>
             </div>
             <div className="flex items-center gap-3">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleSyncConversations}
+                disabled={isSyncing}
+                className="gap-2"
+              >
+                <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+                {isSyncing ? 'Syncing...' : 'Sync Conversations'}
+              </Button>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <Input
@@ -158,9 +253,10 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
           </div>
 
           {/* Grove Canvas */}
-          <div className="flex-1 relative overflow-hidden">
+          <div className="flex-1 relative grove-container">
+            <div className="absolute inset-0 overflow-hidden">
             {/* Subtle background pattern */}
-            <div className="absolute inset-0 opacity-[0.03]">
+            <div className="absolute inset-0 opacity-[0.03] z-0">
               <svg width="100%" height="100%">
                 <defs>
                   <pattern id="leaf-pattern" x="0" y="0" width="120" height="120" patternUnits="userSpaceOnUse">
@@ -175,185 +271,71 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
               </svg>
             </div>
 
-            <svg className="w-full h-full" style={{ minHeight: '700px' }} viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid meet">
-              {/* Watering can (you) in the center */}
-              <defs>
-                <radialGradient id="water-glow">
-                  <stop offset="0%" stopColor="#06b6d4" stopOpacity="0.4" />
-                  <stop offset="100%" stopColor="#06b6d4" stopOpacity="0.1" />
-                </radialGradient>
-                <linearGradient id="water-gradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                  <stop offset="0%" stopColor="#67e8f9" />
-                  <stop offset="100%" stopColor="#06b6d4" />
-                </linearGradient>
-              </defs>
-              
-              {/* Glow effect */}
-              <circle cx="500" cy="350" r="60" fill="url(#water-glow)" />
-              
-              {/* Watering can illustration */}
-              <g transform="translate(500, 350)">
-                {/* Can body */}
-                <ellipse
-                  cx="0"
-                  cy="5"
-                  rx="28"
-                  ry="30"
-                  fill="#78716c"
-                  opacity="0.9"
-                />
-                {/* Water inside (visible through can) */}
-                <ellipse
-                  cx="0"
-                  cy="10"
-                  rx="22"
-                  ry="20"
-                  fill="url(#water-gradient)"
-                  opacity="0.85"
-                />
-                {/* Water shimmer effect */}
-                <ellipse
-                  cx="-5"
-                  cy="5"
-                  rx="12"
-                  ry="8"
-                  fill="white"
-                  opacity="0.4"
-                />
-                
-                {/* Can rim/opening at top */}
-                <ellipse
-                  cx="0"
-                  cy="-23"
-                  rx="20"
-                  ry="6"
-                  fill="#57534e"
-                />
-                <ellipse
-                  cx="0"
-                  cy="-24"
-                  rx="20"
-                  ry="5"
-                  fill="#78716c"
-                />
-                
-                {/* Handle */}
-                <path
-                  d="M 28 0 Q 45 0 45 -15 Q 45 -25 35 -25"
-                  fill="none"
-                  stroke="#78716c"
-                  strokeWidth="4"
-                  strokeLinecap="round"
-                />
-                
-                {/* Spout */}
-                <path
-                  d="M -20 -10 L -40 -18 L -42 -12 L -22 -4 Z"
-                  fill="#78716c"
-                  opacity="0.9"
-                />
-                {/* Spout holes */}
-                <circle cx="-38" cy="-17" r="1.5" fill="#57534e" />
-                <circle cx="-40" cy="-14" r="1.5" fill="#57534e" />
-                <circle cx="-42" cy="-16" r="1.5" fill="#57534e" />
-              </g>
-              
-              {/* "You" label */}
-              <text 
-                x="500" 
-                y="405" 
-                textAnchor="middle" 
-                fill="currentColor" 
-                fontSize="13" 
-                fontWeight="600"
-                opacity="0.8"
-              >
-                You
-              </text>
+            {/* Loading state */}
+            {isLoading && (
+              <div className="absolute inset-0 flex items-center justify-center z-10">
+                <div className="text-center">
+                  <div className="text-lg font-medium opacity-60 mb-4">Loading your grove...</div>
+                  <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+                </div>
+              </div>
+              )}
 
               {/* Empty state message */}
               {contacts.length === 0 && !isLoading && (
-                <text
-                  x="500"
-                  y="280"
-                  textAnchor="middle"
-                  fill="currentColor"
-                  fontSize="16"
-                  fontWeight="500"
-                  opacity="0.6"
-                >
-                  Upload a chat to grow your grove
-                </text>
-              )}
+              <div className="absolute inset-0 flex items-center justify-center z-10">
+                <div className="text-center">
+                  <div className="text-xl font-semibold opacity-70 mb-2">Your grove is waiting to grow</div>
+                  <div className="text-sm opacity-50">Click "Sync Conversations" to get started</div>
+                </div>
+              </div>
+            )}
 
-              {/* Branch + Leaf pairs - render together to ensure 1:1 correspondence */}
-              {layoutedContacts.map((contact) => {
-                // Branch properties based on relationship
-                const thickness = 1 + (contact.closeness || 0.5) * 5; // 1-6px
-                const opacity = 0.3 + (contact.closeness || 0.5) * 0.4; // 0.3-0.7 for better visibility
-                
-                // Calculate branch endpoint
-                // Branch should extend all the way to the leaf's position
-                const angle = Math.atan2(contact.y - 350, contact.x - 500);
-                
-                return (
-                  <g key={contact.id}>
-                    {/* Branch line from "You" to this contact's leaf */}
-                    <line
-                      x1="500"
-                      y1="350"
-                      x2={contact.x}
-                      y2={contact.y}
-                      stroke="#78350f"
-                      strokeWidth={thickness}
-                      opacity={opacity}
-                      strokeLinecap="round"
-                    />
-                    
-                    {/* Leaf at the end of the branch */}
-                    <GroveLeaf
-                      name={contact.name}
-                      category={contact.category}
-                      status={contact.status}
-                      size={contact.size}
-                      x={contact.x}
-                      y={contact.y}
-                      rotation={contact.rotation}
-                      onClick={() => handleLeafClick(contact)}
-                    />
-                  </g>
-                );
-              })}
-            </svg>
+            {/* Pure SVG Graph Visualization with D3.js - Everything synced */}
+            {!isLoading && filteredContacts.length > 0 && (
+              <div 
+                ref={graphContainerRef}
+                className="absolute inset-0 z-0"
+              >
+                <GroveSVG
+                  contacts={filteredContacts}
+                  onContactClick={handleLeafClick}
+                  width={graphDimensions.width}
+                  height={graphDimensions.height}
+                />
+              </div>
+            )}
+
+            </div>
 
             {/* Enhanced Legend */}
-            <div className="absolute bottom-6 left-6">
-              <Card className="p-4 space-y-3 bg-card/90 backdrop-blur-md shadow-xl">
+            <div className="absolute bottom-6 left-6 z-20 pointer-events-none">
+              <Card className="w-52 p-4 space-y-2 bg-card backdrop-blur-md shadow-xl border-2 pointer-events-auto">
                 <p className="text-muted-foreground" style={{ fontSize: '0.75rem', marginBottom: '4px' }}>
                   Relationship Health
                 </p>
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-[#10b981]" />
-                    <span style={{ fontSize: '0.75rem' }}>Healthy - Thriving connection</span>
+                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: GROVE_CONSTANTS.COLORS.HEALTHY }} />
+                    <span className="text-xs">Healthy - Thriving connection</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-[#f59e0b]" />
-                    <span style={{ fontSize: '0.75rem' }}>Attention - Withering, needs care</span>
+                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: GROVE_CONSTANTS.COLORS.ATTENTION }} />
+                    <span className="text-xs">Attention - Withering, needs care</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-[#ec4899]" />
-                    <span style={{ fontSize: '0.75rem' }}>Dormant - Bud waiting to bloom</span>
+                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: GROVE_CONSTANTS.COLORS.DORMANT }} />
+                    <span className="text-xs">Dormant - Bud waiting to bloom</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-[#78350f]" />
-                    <span style={{ fontSize: '0.75rem' }}>At Risk - Needs urgent attention</span>
+                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: GROVE_CONSTANTS.COLORS.WILTED }} />
+                    <span className="text-xs">At Risk - Needs urgent attention</span>
                   </div>
                 </div>
                 <div className="pt-2 border-t text-muted-foreground" style={{ fontSize: '0.7rem' }}>
-                  <p>Branch thickness = closeness</p>
-                  <p>Distance from center = recency</p>
-                  <p>Leaf size = interaction frequency</p>
+                  <p>Branch length = days since last contact</p>
+                  <p>Branch thickness = message frequency (past 50 days)</p>
+                  <p>Health = balanced function of frequency + recency</p>
                 </div>
               </Card>
             </div>
@@ -361,9 +343,37 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
         </div>
 
         {/* Right Panel - Today's Prompts & Dormant Branches */}
-        <div className="w-80 border-l bg-card/30 backdrop-blur-sm flex flex-col">
-          <ScrollArea className="flex-1">
+        <div className="w-80 border-l bg-card/30 backdrop-blur-sm flex flex-col min-h-0">
+          <div className="flex-1 overflow-y-auto min-h-0">
             <div className="p-6 space-y-6">
+              {/* Study Condition Switcher */}
+              {studyStatus && onStudyStatusUpdate ? (
+                <>
+                  {console.log('[GROVE] Rendering ConditionSwitcher with participant:', {
+                    condition: studyStatus.currentCondition,
+                    index: studyStatus.currentConditionIndex,
+                    completed: studyStatus.completedConditions
+                  })}
+                  <ConditionSwitcher
+                    participant={studyStatus}
+                    onConditionComplete={(updatedParticipant) => {
+                      console.log('[GROVE] onConditionComplete called with:', {
+                        newCondition: updatedParticipant.currentCondition,
+                        newIndex: updatedParticipant.currentConditionIndex
+                      });
+                      onStudyStatusUpdate(updatedParticipant);
+                    }}
+                  />
+                </>
+              ) : (
+                console.log('[GROVE] Study status check:', {
+                  hasStudyStatus: !!studyStatus,
+                  hasUpdateCallback: !!onStudyStatusUpdate,
+                  studyStatus
+                }),
+                null
+              )}
+
               {/* Today's Prompts */}
               <div className="space-y-3">
                 <div className="flex items-center gap-2">
@@ -380,19 +390,29 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
                       <p className="text-muted-foreground text-sm">Loading suggestions...</p>
                     </Card>
                   ) : suggestions.length > 0 ? (
-                    suggestions.slice(0, 3).map((suggestion, index) => {
+                    suggestions.slice(0, GROVE_CONSTANTS.MAX_SUGGESTIONS_DISPLAYED).map((suggestion, index) => {
                       const priorityColors = {
-                        high: '#f59e0b',
-                        medium: '#06b6d4',
-                        low: '#10b981'
+                        high: GROVE_CONSTANTS.COLORS.PRIORITY_HIGH,
+                        medium: GROVE_CONSTANTS.COLORS.PRIORITY_MEDIUM,
+                        low: GROVE_CONSTANTS.COLORS.PRIORITY_LOW
                       };
-                      const color = priorityColors[suggestion.priority] || '#06b6d4';
+                      const color = priorityColors[suggestion.priority] || GROVE_CONSTANTS.COLORS.PRIORITY_MEDIUM;
 
                       return (
                         <Card
                           key={index}
                           className="p-4 border-l-4 hover:shadow-md transition-shadow cursor-pointer"
                           style={{ borderLeftColor: color }}
+                          onClick={() => {
+                            console.log('[GROVE] Prompt clicked for contact:', suggestion.contact.name);
+                            // Find the contact and open their modal
+                            const contact = contacts.find(c => c.id === suggestion.contact.id || c.name === suggestion.contact.name);
+                            if (contact) {
+                              handleLeafClick(contact);
+                            } else {
+                              console.warn('[GROVE] Contact not found for prompt:', suggestion.contact);
+                            }
+                          }}
                         >
                           <div className="flex items-start gap-3">
                             <div className="w-2 h-2 rounded-full mt-2" style={{ backgroundColor: color }} />
@@ -432,7 +452,7 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
                   <div className="space-y-2 mt-4">
                     {contacts
                       .filter((c) => c.status === "dormant" || c.status === "wilted")
-                      .slice(0, 3)
+                      .slice(0, GROVE_CONSTANTS.MAX_DORMANT_DISPLAYED)
                       .map((contact) => (
                         <Card
                           key={contact.id}
@@ -449,9 +469,11 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
                               />
                               <span style={{ fontSize: '0.875rem' }}>{contact.name}</span>
                             </div>
+                            {contact.lastContact && (
                             <Badge variant="outline" className="text-xs">
                               {contact.lastContact}
                             </Badge>
+                            )}
                           </div>
                         </Card>
                       ))}
@@ -471,16 +493,20 @@ export function GroveDashboard({ user, onContactSelect, onViewAnalytics, onViewS
                 </Button>
               </div>
             </div>
-          </ScrollArea>
+          </div>
         </div>
       </div>
 
       {/* Relationship Stats Modal */}
-      <RelationshipStatsModal
-        contact={selectedContact}
-        onClose={handleCloseModal}
-        onSendMessage={handleSendMessage}
-      />
+      <AnimatePresence>
+        {selectedContact && (
+          <RelationshipStatsModal
+            contact={selectedContact}
+            onClose={handleCloseModal}
+            onSendMessage={handleSendMessage}
+          />
+        )}
+      </AnimatePresence>
     </>
   );
 }

@@ -5,6 +5,7 @@ Scheduling routes for managing prompts and catch-up sessions
 from flask import Blueprint, request, jsonify, current_app
 from datetime import datetime, timedelta
 from app.services.azure_storage import storage
+from app.utils.helpers import get_user_id, get_partner_name
 import uuid
 
 schedule_bp = Blueprint('schedule', __name__)
@@ -25,7 +26,7 @@ def get_scheduled_prompts():
         List of scheduled prompts
     """
     try:
-        user_id = request.args.get('userId')
+        user_id = request.args.get('userId') or request.args.get('user_id')  # Support both formats
         status_filter = request.args.get('status')
         limit = int(request.args.get('limit', 50))
         offset = int(request.args.get('offset', 0))
@@ -39,14 +40,9 @@ def get_scheduled_prompts():
             return jsonify({'error': 'User not found'}), 404
 
         # Get scheduled prompts from storage
-        # For now, return placeholder data - you would implement storage.get_scheduled_prompts()
-        all_prompts = _get_placeholder_scheduled_prompts(user_id)
-
-        # Apply status filter
-        if status_filter:
-            all_prompts = [p for p in all_prompts if p['status'] == status_filter]
-
-        # Apply pagination
+        all_prompts = storage.get_scheduled_prompts(user_id, status=status_filter, limit=limit + offset, offset=0)
+        
+        # Apply pagination (storage already filtered by status, but we need to paginate)
         total = len(all_prompts)
         prompts = all_prompts[offset:offset + limit]
 
@@ -87,7 +83,7 @@ def schedule_prompt():
         if not data:
             return jsonify({'error': 'No data provided'}), 400
 
-        user_id = data.get('userId')
+        user_id = get_user_id(data)
         contact_id = data.get('contactId')
         prompt = data.get('prompt')
         scheduled_time = data.get('scheduledTime')
@@ -111,11 +107,7 @@ def schedule_prompt():
         scheduled_prompt = {
             'id': str(uuid.uuid4()),
             'userId': user_id,
-            'contact': {
-                'id': contact.get('id'),
-                'name': contact.get('partnerName', 'Unknown'),
-                'status': contact.get('status', 'healthy')
-            },
+            'contactId': contact_id,
             'prompt': prompt,
             'scheduledTime': scheduled_time,
             'priority': priority,
@@ -124,8 +116,18 @@ def schedule_prompt():
             'createdAt': datetime.now().isoformat()
         }
 
-        # TODO: Save to storage
-        # storage.create_scheduled_prompt(scheduled_prompt)
+        # Save to storage
+        prompt_id = storage.create_scheduled_prompt(scheduled_prompt)
+        
+        if not prompt_id:
+            return jsonify({'error': 'Failed to create scheduled prompt'}), 500
+        
+        # Enrich with contact information for response
+        scheduled_prompt['contact'] = {
+            'id': contact.get('id'),
+            'name': get_partner_name(contact) or 'Unknown',
+            'status': contact.get('status', 'healthy')
+        }
 
         return jsonify({
             'success': True,
@@ -156,17 +158,39 @@ def update_scheduled_prompt(prompt_id):
         if not data:
             return jsonify({'error': 'No data provided'}), 400
 
-        user_id = data.get('userId')
-
+        user_id = get_user_id(data)
+        
         if not user_id:
             return jsonify({'error': 'userId is required'}), 400
 
-        # TODO: Get existing prompt from storage
-        # prompt = storage.get_scheduled_prompt(prompt_id, user_id)
+        # Get existing prompt from storage
+        prompts = storage.get_scheduled_prompts(user_id, limit=1000, offset=0)
+        existing_prompt = next((p for p in prompts if p['id'] == prompt_id), None)
+        
+        if not existing_prompt:
+            return jsonify({'error': 'Scheduled prompt not found'}), 404
 
-        # For now, return success
+        # Prepare updates (exclude userId and id from updates)
+        updates = {k: v for k, v in data.items() if k not in ['userId', 'id']}
+        
+        if not updates:
+            return jsonify({'error': 'No fields to update'}), 400
+
+        # Update in storage
+        success = storage.update_scheduled_prompt(prompt_id, user_id, updates)
+        
+        if not success:
+            return jsonify({'error': 'Failed to update scheduled prompt'}), 500
+
+        # Get updated prompt
+        updated_prompts = storage.get_scheduled_prompts(user_id, limit=1000, offset=0)
+        updated_prompt = next((p for p in updated_prompts if p['id'] == prompt_id), None)
+
         return jsonify({
             'success': True,
+            'data': {
+                'scheduledPrompt': updated_prompt
+            },
             'message': 'Prompt updated successfully'
         }), 200
 
@@ -187,13 +211,23 @@ def delete_scheduled_prompt(prompt_id):
         Success message
     """
     try:
-        user_id = request.args.get('userId')
+        user_id = request.args.get('userId') or request.args.get('user_id')  # Support both formats
 
         if not user_id:
             return jsonify({'error': 'userId parameter is required'}), 400
 
-        # TODO: Delete from storage
-        # storage.delete_scheduled_prompt(prompt_id, user_id)
+        # Verify prompt exists
+        prompts = storage.get_scheduled_prompts(user_id, limit=1000, offset=0)
+        existing_prompt = next((p for p in prompts if p['id'] == prompt_id), None)
+        
+        if not existing_prompt:
+            return jsonify({'error': 'Scheduled prompt not found'}), 404
+
+        # Delete from storage
+        success = storage.delete_scheduled_prompt(prompt_id, user_id)
+        
+        if not success:
+            return jsonify({'error': 'Failed to delete scheduled prompt'}), 500
 
         return jsonify({
             'success': True,
@@ -219,7 +253,7 @@ def get_catch_up_suggestions():
         List of catch-up suggestions sorted by priority
     """
     try:
-        user_id = request.args.get('userId')
+        user_id = request.args.get('userId') or request.args.get('user_id')  # Support both formats
         priority_filter = request.args.get('priority')
         limit = int(request.args.get('limit', 10))
 
@@ -261,7 +295,7 @@ def get_catch_up_suggestions():
             suggestion = {
                 'contact': {
                     'id': conv.get('id'),
-                    'name': conv.get('partnerName', 'Unknown'),
+                    'name': get_partner_name(conv) or 'Unknown',
                     'status': status
                 },
                 'lastContact': conv.get('lastMessageAt'),
@@ -318,7 +352,7 @@ def get_calendar_events():
         List of calendar events
     """
     try:
-        user_id = request.args.get('userId')
+        user_id = request.args.get('userId') or request.args.get('user_id')  # Support both formats
         start_date = request.args.get('start')
         end_date = request.args.get('end')
 
@@ -334,7 +368,7 @@ def get_calendar_events():
             return jsonify({'error': 'User not found'}), 404
 
         # Get scheduled prompts in date range
-        all_prompts = _get_placeholder_scheduled_prompts(user_id)
+        all_prompts = storage.get_scheduled_prompts(user_id, limit=1000, offset=0)
 
         # Convert to calendar events
         events = []
@@ -369,51 +403,3 @@ def get_calendar_events():
         return jsonify({'error': 'Internal server error', 'message': str(e)}), 500
 
 
-def _get_placeholder_scheduled_prompts(user_id):
-    """Generate placeholder scheduled prompts for testing"""
-    now = datetime.now()
-
-    return [
-        {
-            'id': str(uuid.uuid4()),
-            'contact': {
-                'id': 'contact-1',
-                'name': 'Tom',
-                'status': 'attention'
-            },
-            'prompt': 'Check in about his new project',
-            'scheduledTime': (now + timedelta(hours=4)).isoformat(),
-            'priority': 'medium',
-            'status': 'pending',
-            'notes': '',
-            'createdAt': now.isoformat()
-        },
-        {
-            'id': str(uuid.uuid4()),
-            'contact': {
-                'id': 'contact-2',
-                'name': 'Priya',
-                'status': 'healthy'
-            },
-            'prompt': 'Follow up on weekend plans',
-            'scheduledTime': (now + timedelta(days=1, hours=10)).isoformat(),
-            'priority': 'low',
-            'status': 'pending',
-            'notes': '',
-            'createdAt': now.isoformat()
-        },
-        {
-            'id': str(uuid.uuid4()),
-            'contact': {
-                'id': 'contact-3',
-                'name': 'Uncle John',
-                'status': 'healthy'
-            },
-            'prompt': 'Birthday wishes and catch up',
-            'scheduledTime': (now + timedelta(days=5, hours=15)).isoformat(),
-            'priority': 'high',
-            'status': 'pending',
-            'notes': 'His birthday',
-            'createdAt': now.isoformat()
-        }
-    ]

@@ -2,10 +2,10 @@ import { useState, useEffect } from "react";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
-import { ScrollArea } from "./ui/scroll-area";
 import { Calendar } from "./ui/calendar";
 import { ArrowLeft, Calendar as CalendarIcon, Clock, User, Droplet } from "lucide-react";
 import { apiClient, User as UserType, ScheduledPrompt, CatchUpSuggestion } from "../services/api";
+import { ScrollArea } from "./ui/scroll-area";
 
 interface ScheduleProps {
   user: UserType;
@@ -64,11 +64,12 @@ export function Schedule({ user, onBack }: ScheduleProps) {
           </p>
         </div>
       </div>
+      <ScrollArea className="h-full">
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden min-h-0">
         {/* Left: Calendar & Scheduled */}
-        <div className="flex-1 flex flex-col border-r">
-          <ScrollArea className="flex-1 p-6">
+        <div className="flex-1 flex flex-col border-r min-h-0">
+          <div className="flex-1 overflow-y-auto scrollable p-6">
             <div className="max-w-2xl space-y-6">
               {/* Calendar */}
               <Card className="p-6">
@@ -152,11 +153,11 @@ export function Schedule({ user, onBack }: ScheduleProps) {
                 </div>
               </div>
             </div>
-          </ScrollArea>
+          </div>
         </div>
 
         {/* Right: Catch-Up Mode */}
-        <div className="w-96 flex flex-col bg-card/30">
+        <div className="w-96 flex flex-col bg-card/30 min-h-0">
           <div className="border-b p-4">
             <h3>Catch-Up Mode</h3>
             <p className="text-muted-foreground mt-1" style={{ fontSize: '0.875rem' }}>
@@ -164,8 +165,8 @@ export function Schedule({ user, onBack }: ScheduleProps) {
             </p>
           </div>
 
-          <div className="flex-1 overflow-hidden">
-            <ScrollArea className="h-full p-6">
+          <div className="flex-1 overflow-hidden min-h-0">
+            <div className="h-full overflow-y-auto scrollable p-6">
             <div className="space-y-4">
               <div className="space-y-2">
                 <p className="text-muted-foreground" style={{ fontSize: '0.875rem' }}>
@@ -241,10 +242,12 @@ export function Schedule({ user, onBack }: ScheduleProps) {
                 </p>
               </div>
             </div>
-          </ScrollArea>
+          </div>
           </div>
         </div>
       </div>
+      </ScrollArea>
+
     </div>
   );
 }

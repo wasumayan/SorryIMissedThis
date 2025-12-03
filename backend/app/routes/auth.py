@@ -86,6 +86,11 @@ def register():
                 'ai': {
                     'promptStyle': 'friendly',
                     'autoAnalysis': True
+                },
+                'chatTracking': {
+                    'mode': 'all',  # 'all', 'recent', 'selected'
+                    'maxChats': 50,  # For 'recent' mode
+                    'selectedChatIds': []  # For 'selected' mode
                 }
             },
             'connectedPlatforms': {
@@ -289,4 +294,122 @@ def get_current_user():
 
     except Exception as e:
         print(f"Get current user error: {str(e)}")
+        return jsonify({'error': 'Internal server error', 'message': str(e)}), 500
+
+
+@auth_bp.route('/purge', methods=['POST'])
+def purge_all_data():
+    """Purge all user data - for study participants to reset their data"""
+    try:
+        # Get token from Authorization header
+        auth_header = request.headers.get('Authorization')
+
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return jsonify({'error': 'No token provided'}), 401
+
+        token = auth_header.replace('Bearer ', '')
+
+        # Get user_id from token
+        if not storage.database:
+            return jsonify({'error': 'Database not configured'}), 503
+
+        try:
+            query = "SELECT * FROM c WHERE c.token = @token"
+            parameters = [{"name": "@token", "value": token}]
+            sessions = list(storage.sessions_container.query_items(
+                query=query,
+                parameters=parameters,
+                enable_cross_partition_query=True
+            ))
+        except Exception:
+            # Fallback to mock storage
+            sessions = [s for s in storage.sessions.values() if s.get('token') == token]
+
+        if not sessions:
+            return jsonify({'error': 'Invalid or expired token'}), 401
+
+        session = sessions[0]
+        user_id = session['userId']
+
+        # Purge all user data
+        # 1. Delete all conversations
+        try:
+            query = "SELECT * FROM c WHERE c.type = 'conversation' AND c.userId = @userId"
+            parameters = [{"name": "@userId", "value": user_id}]
+            conversations = list(storage.conversations_container.query_items(
+                query=query,
+                parameters=parameters,
+                enable_cross_partition_query=True
+            ))
+            for conv in conversations:
+                storage.conversations_container.delete_item(item=conv['id'], partition_key=user_id)
+        except Exception as e:
+            print(f"Error deleting conversations: {str(e)}")
+
+        # 2. Delete all contacts
+        try:
+            query = "SELECT * FROM c WHERE c.type = 'contact' AND c.userId = @userId"
+            parameters = [{"name": "@userId", "value": user_id}]
+            contacts = list(storage.contacts_container.query_items(
+                query=query,
+                parameters=parameters,
+                enable_cross_partition_query=True
+            ))
+            for contact in contacts:
+                storage.contacts_container.delete_item(item=contact['id'], partition_key=user_id)
+        except Exception as e:
+            print(f"Error deleting contacts: {str(e)}")
+
+        # 3. Delete study data if exists
+        try:
+            participant = storage.get_study_participant(user_id)
+            if participant:
+                query = "SELECT * FROM c WHERE c.type = 'study_participant' AND c.userId = @userId"
+                parameters = [{"name": "@userId", "value": user_id}]
+                items = list(storage.study_container.query_items(
+                    query=query,
+                    parameters=parameters,
+                    enable_cross_partition_query=True
+                ))
+                for item in items:
+                    storage.study_container.delete_item(item=item['id'], partition_key=user_id)
+
+            # Delete survey responses
+            query = "SELECT * FROM c WHERE c.type = 'survey_response' AND c.userId = @userId"
+            parameters = [{"name": "@userId", "value": user_id}]
+            items = list(storage.study_container.query_items(
+                query=query,
+                parameters=parameters,
+                enable_cross_partition_query=True
+            ))
+            for item in items:
+                storage.study_container.delete_item(item=item['id'], partition_key=user_id)
+
+            # Delete study metrics
+            query = "SELECT * FROM c WHERE c.type = 'study_metric' AND c.userId = @userId"
+            parameters = [{"name": "@userId", "value": user_id}]
+            items = list(storage.study_container.query_items(
+                query=query,
+                parameters=parameters,
+                enable_cross_partition_query=True
+            ))
+            for item in items:
+                storage.study_container.delete_item(item=item['id'], partition_key=user_id)
+        except Exception as e:
+            print(f"Error deleting study data: {str(e)}")
+
+        # 4. Delete user account and session
+        try:
+            storage.users_container.delete_item(item=user_id, partition_key=user_id)
+            storage.sessions_container.delete_item(item=session['id'], partition_key=user_id)
+        except Exception as e:
+            print(f"Error deleting user/session: {str(e)}")
+
+        return jsonify({
+            'success': True,
+            'message': 'All data has been purged successfully'
+        }), 200
+
+    except Exception as e:
+        print(f"Purge error: {str(e)}")
         return jsonify({'error': 'Internal server error', 'message': str(e)}), 500

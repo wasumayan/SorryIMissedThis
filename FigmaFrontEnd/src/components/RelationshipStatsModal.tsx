@@ -4,18 +4,10 @@ import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Progress } from "./ui/progress";
+import { Contact as ApiContact } from "../services/api";
 
-interface Contact {
-  id: string;
-  name: string;
-  category: "family" | "friends" | "work";
-  status: "healthy" | "attention" | "dormant" | "wilted";
-  size: number;
-  lastContact: string;
-  messageCount?: number;
-  reciprocityScore?: number;
-  daysConnected?: number;
-}
+// Use the API Contact type instead of defining our own
+type Contact = ApiContact;
 
 interface RelationshipStatsModalProps {
   contact: Contact | null;
@@ -30,29 +22,39 @@ export function RelationshipStatsModal({
   onSendMessage,
   onWaterContact 
 }: RelationshipStatsModalProps) {
-  if (!contact) return null;
+  console.log('[MODAL] Render called with contact:', contact ? `${contact.name} (${contact.id})` : 'null');
+  
+  if (!contact) {
+    console.log('[MODAL] No contact provided, not rendering');
+    return null;
+  }
+  
+  console.log('[MODAL] Rendering modal for contact:', contact.name, contact.id);
 
-  // Generate mock stats
+  // Use real contact data from API Contact type
   const stats = {
-    messageCount: contact.messageCount || Math.floor(Math.random() * 200) + 50,
-    reciprocityScore: contact.reciprocityScore || Math.floor(Math.random() * 40) + 60,
-    daysConnected: contact.daysConnected || Math.floor(Math.random() * 500) + 100,
-    lastTopics: ["Weekend plans", "Work updates", "Family news"],
-    responseTime: "Usually replies in 2-4 hours",
+    messageCount: contact.metrics?.totalMessages ?? 0,
+    reciprocityScore: Math.round((contact.metrics?.reciprocity ?? 0.5) * 100),
+    daysConnected: contact.daysSinceContact ?? 0,
+    lastContact: contact.lastContact,
+    lastTopics: contact.aiAnalysis?.preferredTopics ?? [],
+    responseTime: contact.metrics?.averageResponseTime 
+      ? `Usually replies in ${Math.round(contact.metrics.averageResponseTime)} hours`
+      : null,
     connectionStrength: contact.status === "healthy" ? "Strong" : 
                         contact.status === "attention" ? "Good" :
                         contact.status === "dormant" ? "Fading" : "Weak",
   };
 
-  // Generate contextual prompt
-  const prompts = {
+  // Use real prompts from contact if available, otherwise use contextual defaults
+  const defaultPrompts = {
     healthy: [
-      `Share a funny meme ${contact.name} would love`,
-      `Ask about their weekend plans`,
-      `Send appreciation for recent conversation`,
+      `Share something ${contact.name} would appreciate`,
+      `Ask about their recent updates`,
+      `Send appreciation for the connection`,
     ],
     attention: [
-      `Follow up on what ${contact.name} mentioned last time`,
+      `Follow up on what ${contact.name} mentioned`,
       `Check in on how things are going`,
       `Share something that reminded you of them`,
     ],
@@ -68,7 +70,8 @@ export function RelationshipStatsModal({
     ],
   };
 
-  const currentPrompts = prompts[contact.status];
+  // API Contact doesn't have suggestedPrompts, use defaults
+  const currentPrompts = defaultPrompts[contact.status] || [];
   
   // Health-based colors instead of category colors
   const healthColors = {
@@ -82,7 +85,7 @@ export function RelationshipStatsModal({
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4">
         {/* Backdrop */}
         <motion.div
           initial={{ opacity: 0 }}
@@ -98,12 +101,12 @@ export function RelationshipStatsModal({
           animate={{ scale: 1, opacity: 1, y: 0 }}
           exit={{ scale: 0.9, opacity: 0, y: 20 }}
           transition={{ type: "spring", duration: 0.5 }}
-          className="relative w-full max-w-2xl"
+          className="relative w-full max-w-2xl max-h-[90vh] flex flex-col"
         >
-          <Card className="overflow-hidden bg-card/95 backdrop-blur-xl shadow-2xl">
+          <Card className="overflow-hidden bg-card/95 backdrop-blur-xl shadow-2xl flex flex-col max-h-full">
             {/* Header with plant illustration */}
-            <div 
-              className="relative p-6 pb-20"
+            <div
+              className="relative p-4 sm:p-6 pb-16 sm:pb-20 flex-shrink-0"
               style={{
                 background: `linear-gradient(135deg, ${statusColor}15 0%, ${statusColor}05 100%)`,
               }}
@@ -192,22 +195,28 @@ export function RelationshipStatsModal({
                   <h4>Recent Topics</h4>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {stats.lastTopics.map((topic, i) => (
+                  {stats.lastTopics.length > 0 ? (
+                    stats.lastTopics.map((topic, i) => (
                     <Badge key={i} variant="secondary">
-                      {topic}
+                        {typeof topic === 'string' ? topic : (topic.topic || topic)}
                     </Badge>
-                  ))}
+                    ))
+                  ) : (
+                    <p className="text-muted-foreground text-sm">No topic data available</p>
+                  )}
                 </div>
               </div>
 
               {/* Response Pattern */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm text-muted-foreground">Response Pattern</span>
-                  <span className="text-sm">{stats.responseTime}</span>
+              {stats.responseTime && (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm text-muted-foreground">Response Pattern</span>
+                    <span className="text-sm">{stats.responseTime}</span>
+                  </div>
+                  <Progress value={stats.reciprocityScore} className="h-2" />
                 </div>
-                <Progress value={stats.reciprocityScore} className="h-2" />
-              </div>
+              )}
 
               {/* AI Prompts */}
               <div className="pt-4 border-t">
@@ -216,7 +225,8 @@ export function RelationshipStatsModal({
                   <h4>Suggested Messages</h4>
                 </div>
                 <div className="space-y-2">
-                  {currentPrompts.map((prompt, i) => (
+                  {currentPrompts.length > 0 ? (
+                    currentPrompts.map((prompt, i) => (
                     <motion.div
                       key={i}
                       initial={{ opacity: 0, x: -20 }}
@@ -236,7 +246,10 @@ export function RelationshipStatsModal({
                         </div>
                       </Card>
                     </motion.div>
-                  ))}
+                    ))
+                  ) : (
+                    <p className="text-muted-foreground text-sm">No prompts available</p>
+                  )}
                 </div>
               </div>
 
@@ -250,7 +263,7 @@ export function RelationshipStatsModal({
                   }}
                 >
                   <Send className="w-4 h-4 mr-2" />
-                  Open in WhatsApp
+                  Send Message
                 </Button>
                 {(contact.status === "dormant" || contact.status === "wilted" || contact.status === "attention") && onWaterContact && (
                   <Button 

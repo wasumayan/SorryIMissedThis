@@ -16,8 +16,8 @@ class AIService:
 
     def __init__(self):
         """Initialize Azure OpenAI service"""
-        # Check for Azure OpenAI API key
-        self.api_key = os.getenv("AZURE_OPENAI_API_KEY")
+        # Check for OpenAI API key (supports both OPENAI_API_KEY and AZURE_OPENAI_API_KEY for compatibility)
+        self.api_key = os.getenv("OPENAI_API_KEY") or os.getenv("AZURE_OPENAI_API_KEY")
         self.deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o-mini")
         self.max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", 500))
         self.temperature = float(os.getenv("OPENAI_TEMPERATURE", 0.7))
@@ -26,7 +26,120 @@ class AIService:
             f"DEBUG: Azure OpenAI API key loaded: {bool(self.api_key)} (length: {len(self.api_key) if self.api_key else 0})", flush=True)
         if not self.api_key:
             print(
-                "WARNING: AZURE_OPENAI_API_KEY not set. Using fallback prompts.", flush=True)
+                "WARNING: OPENAI_API_KEY not set. Using fallback prompts.", flush=True)
+
+    def infer_contact_name(self, messages: List[Dict], phone_number: Optional[str] = None, user_names: Optional[List[str]] = None) -> Optional[str]:
+        """
+        Infer contact name from message history using AI
+        
+        Args:
+            messages: List of message dictionaries with 'text', 'sender', 'isFromMe' fields
+            phone_number: Optional phone number for context
+            user_names: Optional list of user's name variations to exclude (e.g., ["John", "John Doe", "Johnny"])
+            
+        Returns:
+            Inferred name or None if not found
+        """
+        if not messages or not self.api_key:
+            return None
+        
+        # Extract user's name from their own messages if not provided
+        if user_names is None:
+            user_names = []
+            # Get user's name from messages they sent (isFromMe=True)
+            user_messages = [msg for msg in messages if msg.get('isFromMe', False)]
+            for msg in user_messages:
+                sender_name = msg.get('senderName') or msg.get('sender')
+                if sender_name and sender_name not in user_names:
+                    # Extract name parts (first name, full name variations)
+                    name_parts = sender_name.split()
+                    if len(name_parts) > 0:
+                        user_names.append(name_parts[0])  # First name
+                    if len(name_parts) > 1:
+                        user_names.append(' '.join(name_parts))  # Full name
+                    user_names.append(sender_name)  # Original name
+        
+        # Filter to only messages from the contact (not from me)
+        contact_messages = [
+            msg for msg in messages 
+            if not msg.get('isFromMe', False) and msg.get('text')
+        ]
+        
+        if not contact_messages:
+            return None
+        
+        # Get recent messages (last 20 for context)
+        recent_messages = contact_messages[-20:]
+        message_texts = [msg.get('text', '') for msg in recent_messages if msg.get('text')]
+        
+        if not message_texts:
+            return None
+        
+        # Prepare context for AI
+        context = "\n".join([f"Message: {text}" for text in message_texts[-10:]])  # Last 10 messages
+        
+        # Build exclusion list for prompt
+        exclusion_text = ""
+        if user_names:
+            unique_user_names = list(set([name.lower().strip() for name in user_names if name and len(name.strip()) > 0]))
+            if unique_user_names:
+                exclusion_text = f"\n\nIMPORTANT: Do NOT return any of these names (these are the user's own name): {', '.join(unique_user_names)}"
+        
+        prompt = f"""Analyze the following messages from a contact and extract their name if mentioned.
+
+Messages:
+{context}
+
+{f"Phone number: {phone_number}" if phone_number else ""}
+{exclusion_text}
+
+Instructions:
+1. Look for the contact's name in introductions, signatures, or when they refer to themselves
+2. Common patterns: "Hi, this is [Name]", "It's [Name]", "- [Name]", "From: [Name]", "Sent from [Name]'s iPhone"
+3. Return ONLY the name (first name or full name), nothing else
+4. If no name can be determined, return "null"
+5. Return a single name, not multiple names
+6. DO NOT return the user's own name or any variations of it{exclusion_text and ' (see exclusion list above)' or ''}
+
+Name:"""
+
+        try:
+            response = generate_chat_completion(
+                messages=[{"role": "user", "content": prompt}],
+                deployment=self.deployment,
+                max_tokens=50,
+                temperature=0.3  # Lower temperature for more deterministic name extraction
+            )
+            
+            if response and response.strip().lower() not in ['null', 'none', 'n/a', '']:
+                name = response.strip()
+                # Clean up the response (remove quotes, extra text)
+                name = name.strip('"\'')
+                # Take first line only
+                name = name.split('\n')[0].strip()
+                
+                # Validate it looks like a name
+                if len(name) < 2 or len(name) > 50 or not name.replace(' ', '').replace('-', '').isalpha():
+                    return None
+                
+                # SAFEGUARD: Check if inferred name matches user's name (case-insensitive)
+                if user_names:
+                    name_lower = name.lower().strip()
+                    for user_name in user_names:
+                        if user_name and name_lower == user_name.lower().strip():
+                            print(f"SAFEGUARD: Rejected inferred name '{name}' - matches user's name '{user_name}'", flush=True)
+                            return None
+                        # Also check if it's a partial match (e.g., "John" matches "John Doe")
+                        user_name_parts = user_name.lower().split()
+                        if len(user_name_parts) > 0 and name_lower == user_name_parts[0]:
+                            print(f"SAFEGUARD: Rejected inferred name '{name}' - matches user's first name '{user_name_parts[0]}'", flush=True)
+                            return None
+                
+                return name
+        except Exception as e:
+            print(f"Error inferring name with AI: {str(e)}", flush=True)
+        
+        return None
 
     def generate_prompts(
         self,
@@ -51,13 +164,18 @@ class AIService:
             f"PRINT 8: Azure OpenAI API key exists: {bool(self.api_key)}", flush=True)
         # If no API key, use fallback
         if not self.api_key:
-            print("PRINT 9: No Azure OpenAI API key, using fallback prompts", flush=True)
+            print("PRINT 9: No OpenAI API key, using fallback prompts", flush=True)
             return self._generate_fallback_prompts(conversation, num_prompts)
 
         try:
             print("PRINT 10: About to prepare context", flush=True)
             # Prepare conversation context
             context = self._prepare_context(conversation)
+            
+            # Analyze user's texting style from their messages
+            user_style = self._analyze_user_texting_style(conversation)
+            print(f"PRINT 10.5: User texting style: {user_style['style_description']}", flush=True)
+            
             print("PRINT 11: Context prepared, about to call Azure OpenAI", flush=True)
 
             # Generate prompts using Azure OpenAI
@@ -66,7 +184,8 @@ class AIService:
                 partner_name=conversation.partner_name,
                 num_prompts=num_prompts,
                 tone=user_tone_preference,
-                relationship_health=conversation.get_relationship_health()
+                relationship_health=conversation.get_relationship_health(),
+                user_texting_style=user_style
             )
             print("PRINT 12: Azure OpenAI returned, creating prompt objects", flush=True)
 
@@ -93,6 +212,120 @@ class AIService:
             print(f"Error generating prompts: {str(e)}", flush=True)
             return self._generate_fallback_prompts(conversation, num_prompts)
 
+    def _analyze_user_texting_style(self, conversation: Conversation, max_messages: int = 100) -> Dict[str, any]:
+        """
+        Analyze the user's texting style from their messages in this conversation
+        
+        Returns a dictionary describing the user's texting patterns
+        """
+        # Get last max_messages messages for tone analysis
+        recent_messages = conversation.get_last_n_messages(max_messages)
+        
+        # Get user messages (assuming user_id or 'user' is the sender)
+        user_messages = [msg for msg in recent_messages 
+                        if msg.sender == conversation.user_id or msg.sender.lower() == 'user']
+        
+        if not user_messages:
+            # Fallback: try to identify user messages by comparing with partner
+            # If we have partner_name, messages not from partner are from user
+            user_messages = [msg for msg in recent_messages 
+                           if msg.sender.lower() != conversation.partner_name.lower()]
+        
+        if len(user_messages) < 3:
+            # Not enough messages to analyze style
+            return {
+                'style_description': 'neutral',
+                'emoji_usage': 'occasional',
+                'punctuation_style': 'standard',
+                'sentence_length': 'medium',
+                'formality': 'neutral'
+            }
+        
+        # Analyze patterns
+        all_text = ' '.join([msg.content for msg in user_messages if msg.content])
+        
+        # Emoji usage
+        import re
+        emoji_count = len(re.findall(r'[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF\U00002702-\U000027B0\U000024C2-\U0001F251]+', all_text))
+        emoji_ratio = emoji_count / len(user_messages) if user_messages else 0
+        if emoji_ratio > 0.5:
+            emoji_usage = 'frequent'
+        elif emoji_ratio > 0.2:
+            emoji_usage = 'moderate'
+        else:
+            emoji_usage = 'occasional'
+        
+        # Punctuation style
+        exclamation_count = all_text.count('!')
+        question_count = all_text.count('?')
+        ellipsis_count = all_text.count('...') + all_text.count('…')
+        total_chars = len(all_text)
+        
+        if exclamation_count / max(total_chars, 1) > 0.02:
+            punctuation_style = 'enthusiastic'
+        elif ellipsis_count > len(user_messages) * 0.1:
+            punctuation_style = 'casual'
+        elif question_count / max(total_chars, 1) > 0.03:
+            punctuation_style = 'inquisitive'
+        else:
+            punctuation_style = 'standard'
+        
+        # Sentence length
+        messages_with_content = [msg for msg in user_messages if msg.content]
+        avg_length = sum(len(msg.content.split()) for msg in messages_with_content) / len(messages_with_content) if messages_with_content else 0
+        if avg_length > 20:
+            sentence_length = 'long'
+        elif avg_length < 5:
+            sentence_length = 'short'
+        else:
+            sentence_length = 'medium'
+        
+        # Formality indicators
+        formal_words = ['please', 'thank you', 'would', 'could', 'should']
+        casual_words = ['hey', 'yo', 'lol', 'haha', 'omg', 'btw']
+        formal_count = sum(1 for word in formal_words if word in all_text.lower())
+        casual_count = sum(1 for word in casual_words if word in all_text.lower())
+        
+        if formal_count > casual_count * 2:
+            formality = 'formal'
+        elif casual_count > formal_count * 2:
+            formality = 'casual'
+        else:
+            formality = 'neutral'
+        
+        # Capitalization style
+        messages_with_content = [msg for msg in user_messages if msg.content]
+        all_caps_ratio = sum(1 for msg in messages_with_content if msg.content.isupper() and len(msg.content) > 3) / len(messages_with_content) if messages_with_content else 0
+        if all_caps_ratio > 0.1:
+            capitalization = 'expressive'
+        else:
+            capitalization = 'standard'
+        
+        # Build style description
+        style_parts = []
+        if emoji_usage != 'occasional':
+            style_parts.append(f"uses emojis {emoji_usage}ly")
+        if punctuation_style != 'standard':
+            style_parts.append(f"{punctuation_style} punctuation")
+        if sentence_length != 'medium':
+            style_parts.append(f"{sentence_length} sentences")
+        if formality != 'neutral':
+            style_parts.append(f"{formality} language")
+        if capitalization == 'expressive':
+            style_parts.append("sometimes uses all caps for emphasis")
+        
+        style_description = ', '.join(style_parts) if style_parts else 'neutral, standard texting style'
+        
+        return {
+            'style_description': style_description,
+            'emoji_usage': emoji_usage,
+            'punctuation_style': punctuation_style,
+            'sentence_length': sentence_length,
+            'formality': formality,
+            'capitalization': capitalization,
+            'example_messages': [msg.content[:100] for msg in user_messages[-3:] if msg.content]  # Last 3 user messages as examples
+        }
+
     def _prepare_context(self, conversation: Conversation, max_messages: int = 20) -> str:
         """Prepare conversation context for AI"""
 
@@ -118,10 +351,22 @@ class AIService:
 
         context_parts.append("\nRecent conversation:")
 
-        # Add recent messages
+        # Add recent messages with proper labeling
         for msg in recent_messages:
+            # Skip messages with no content
+            if not msg.content:
+                continue
+            
+            # Properly label messages: "You:" for user messages, "Contact:" for contact messages
+            # Check if sender is 'user' or matches user_id (user's messages)
+            if msg.sender == 'user' or msg.sender == conversation.user_id or msg.sender.lower() == 'user':
+                sender_label = "You"
+            else:
+                # This is a message from the contact
+                sender_label = conversation.partner_name
+            
             # Limit message length
-            context_parts.append(f"{msg.sender}: {msg.content[:200]}")
+            context_parts.append(f"{sender_label}: {msg.content[:200]}")
 
         return "\n".join(context_parts)
 
@@ -131,10 +376,10 @@ class AIService:
         partner_name: str,
         num_prompts: int,
         tone: str,
-        relationship_health: str
+        relationship_health: str,
+        user_texting_style: Dict = None
     ) -> List[Dict]:
         """Call Azure OpenAI API to generate prompts"""
-        print("PRINT 15: _call_azure_openai() called", flush=True)
 
         # Determine prompt type based on relationship health
         if relationship_health == "at_risk":
@@ -145,7 +390,26 @@ class AIService:
             prompt_focus = "maintaining connection and showing interest"
         else:
             prompt_focus = "continuing the conversation naturally"
+
+        print("PRINT 15: _call_azure_openai() called", flush=True)
         print(f"PRINT 16: Prompt focus determined: {prompt_focus}", flush=True)
+
+        # Build user style description
+        style_instruction = ""
+        if user_texting_style:
+            style_desc = user_texting_style.get('style_description', 'standard')
+            style_instruction = f"""
+6. MOST IMPORTANTLY: Match the user's actual texting style. The user's texting style is: {style_desc}
+   - Emoji usage: {user_texting_style.get('emoji_usage', 'occasional')}
+   - Punctuation: {user_texting_style.get('punctuation_style', 'standard')}
+   - Sentence length: {user_texting_style.get('sentence_length', 'medium')}
+   - Formality: {user_texting_style.get('formality', 'neutral')}
+   
+   Example of user's messages:
+   {chr(10).join(user_texting_style.get('example_messages', [])[:3])}
+   
+   Your prompts should sound like the user wrote them, matching their exact style, vocabulary, and patterns.
+"""
 
         # Create system message
         system_message = f"""You are a helpful assistant that generates natural, context-aware conversation prompts 
@@ -157,7 +421,7 @@ Your prompts should:
 3. Match a {tone} tone
 4. Focus on {prompt_focus}
 5. Reference specific topics or events mentioned
-6. Be short (1-2 sentences)
+6. Be short (1-2 sentences){style_instruction}
 
 Return {num_prompts} different prompts as a JSON array with this structure:
 [
@@ -324,3 +588,60 @@ Generate prompts that would help naturally continue or restart this conversation
             "typical_response_hours": avg_response,
             "best_days": ["weekday"]
         }
+
+    def classify_contact_category(self, conversation: Conversation) -> str:
+        """
+        Classify a contact into category (family, friends, work) using AI
+        
+        Args:
+            conversation: The conversation to classify
+            
+        Returns:
+            Category string: 'family', 'friends', or 'work'
+        """
+        if not self.api_key:
+            # Fallback to default
+            return 'friends'
+        
+        try:
+            # Get conversation context
+            recent_messages = conversation.get_last_n_messages(20)
+            context = "\n".join([f"{msg.sender}: {msg.content[:100]}" for msg in recent_messages[:10] if msg.content])
+            
+            # Create classification prompt
+            system_message = """You are a helpful assistant that classifies relationships based on conversation content.
+
+Analyze the conversation and classify the relationship into one of these categories:
+- "family": Family members (parents, siblings, relatives)
+- "friends": Close friends, casual friends, social connections
+- "work": Professional contacts, colleagues, business relationships
+
+Return ONLY the category name (family, friends, or work), nothing else."""
+
+            user_message = f"""Classify this conversation with {conversation.partner_name}:
+
+{context}
+
+What category best describes this relationship?"""
+
+            response = generate_chat_completion(
+                messages=[
+                    {"role": "system", "content": system_message},
+                    {"role": "user", "content": user_message}
+                ],
+                deployment=self.deployment,
+                temperature=0.3,  # Lower temperature for classification
+                max_tokens=10
+            )
+            
+            # Parse response
+            category = response.strip().lower()
+            if category in ['family', 'friends', 'work']:
+                return category
+            else:
+                # Default fallback
+                return 'friends'
+                
+        except Exception as e:
+            print(f"Error classifying contact: {str(e)}")
+            return 'friends'  # Default fallback

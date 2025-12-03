@@ -25,7 +25,12 @@ class Message:
     @classmethod
     def from_dict(cls, data: Dict) -> 'Message':
         """Create from Firestore dictionary"""
-        data['timestamp'] = datetime.fromisoformat(data['timestamp'])
+        # Handle timestamp - might already be a datetime object from Cosmos DB
+        if isinstance(data['timestamp'], str):
+            data['timestamp'] = datetime.fromisoformat(data['timestamp'])
+        elif not isinstance(data['timestamp'], datetime):
+            # If it's neither string nor datetime, use current time as fallback
+            data['timestamp'] = datetime.now()
         return cls(**data)
 
 
@@ -42,9 +47,18 @@ class ConversationMetrics:
     common_topics: List[str] = field(default_factory=list)
     
     def to_dict(self) -> Dict:
-        """Convert to dictionary for Firestore"""
+        """Convert to dictionary for Firestore/Cosmos DB"""
         data = asdict(self)
-        if self.last_message_time:
+        # ALWAYS convert datetime to ISO format string (required for JSON serialization)
+        # Check both the instance attribute and the dict value to be safe
+        if 'last_message_time' in data:
+            if isinstance(data['last_message_time'], datetime):
+                data['last_message_time'] = data['last_message_time'].isoformat()
+            elif data['last_message_time'] is None:
+                # Keep None as None (valid JSON value)
+                pass
+        # Also check the instance attribute directly (in case asdict didn't include it)
+        if self.last_message_time and isinstance(self.last_message_time, datetime):
             data['last_message_time'] = self.last_message_time.isoformat()
         return data
     
@@ -52,7 +66,10 @@ class ConversationMetrics:
     def from_dict(cls, data: Dict) -> 'ConversationMetrics':
         """Create from Firestore dictionary"""
         if 'last_message_time' in data and data['last_message_time']:
-            data['last_message_time'] = datetime.fromisoformat(data['last_message_time'])
+            # Handle last_message_time - might already be a datetime object from Cosmos DB
+            if isinstance(data['last_message_time'], str):
+                data['last_message_time'] = datetime.fromisoformat(data['last_message_time'])
+            # If it's already a datetime, leave it as is
         return cls(**data)
 
 
@@ -66,8 +83,23 @@ class Conversation:
     metrics: ConversationMetrics
     conversation_id: Optional[str] = None
     category: str = "friends"  # family, friends, work - relationship categories
+    tone: Optional[str] = None  # formal, friendly, playful - conversation-specific tone
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
+    
+    def get_tone(self) -> str:
+        """Get tone for this conversation, with smart defaults based on category"""
+        if self.tone:
+            return self.tone
+        
+        # Default tones based on category
+        category_tone_map = {
+            'work': 'formal',
+            'family': 'friendly',
+            'friends': 'friendly'
+        }
+        
+        return category_tone_map.get(self.category, 'friendly')
     
     def to_dict(self) -> Dict:
         """Convert to dictionary for Firestore/Cosmos DB"""
@@ -85,17 +117,18 @@ class Conversation:
             'partnerName': self.partner_name,  # camelCase for frontend
             'partner_id': self.partner_id,
             'partnerId': self.partner_id,  # camelCase for frontend
-            'messages': [msg.to_dict() for msg in self.messages],
-            'messageCount': len(self.messages),
+            'messages': [],  # PRIVACY: Never store message content in cloud - messages stay local only
+            'messageCount': len(self.messages),  # Metadata: count only, no content
             'metrics': metrics_dict,
             'conversation_id': self.conversation_id,
             'conversationId': self.conversation_id,  # camelCase for frontend
             'category': self.category,
+            'tone': self.get_tone(),  # Conversation-specific tone
             'status': self.get_relationship_health(),
             'reciprocity': metrics_dict.get('reciprocity', 0.5),  # For frontend access
             'daysSinceContact': metrics_dict.get('days_since_contact', 0),  # camelCase
             'avgResponseTime': metrics_dict.get('avg_response_time', 0),  # camelCase
-            'lastMessageAt': metrics_dict.get('last_message_time'),  # camelCase
+            'lastMessageAt': metrics_dict.get('last_message_time'),  # camelCase - should already be ISO string from metrics.to_dict()
             'interactionFrequency': round(interaction_frequency, 2),  # Messages per day
             'created_at': self.created_at.isoformat(),
             'createdAt': self.created_at.isoformat(),  # camelCase for frontend
@@ -109,8 +142,19 @@ class Conversation:
         """Create from Firestore dictionary"""
         data['messages'] = [Message.from_dict(msg) for msg in data['messages']]
         data['metrics'] = ConversationMetrics.from_dict(data['metrics'])
-        data['created_at'] = datetime.fromisoformat(data['created_at'])
-        data['updated_at'] = datetime.fromisoformat(data['updated_at'])
+
+        # Handle created_at - might already be a datetime object from Cosmos DB
+        if isinstance(data['created_at'], str):
+            data['created_at'] = datetime.fromisoformat(data['created_at'])
+        elif not isinstance(data['created_at'], datetime):
+            data['created_at'] = datetime.now()
+
+        # Handle updated_at - might already be a datetime object from Cosmos DB
+        if isinstance(data['updated_at'], str):
+            data['updated_at'] = datetime.fromisoformat(data['updated_at'])
+        elif not isinstance(data['updated_at'], datetime):
+            data['updated_at'] = datetime.now()
+
         return cls(**data)
     
     def get_relationship_health(self) -> str:
@@ -155,7 +199,12 @@ class ConversationPrompt:
     @classmethod
     def from_dict(cls, data: Dict) -> 'ConversationPrompt':
         """Create from Firestore dictionary"""
-        data['created_at'] = datetime.fromisoformat(data['created_at'])
+        # Handle created_at - might already be a datetime object from Cosmos DB
+        if isinstance(data['created_at'], str):
+            data['created_at'] = datetime.fromisoformat(data['created_at'])
+        elif not isinstance(data['created_at'], datetime):
+            # If it's neither string nor datetime, use current time as fallback
+            data['created_at'] = datetime.now()
         return cls(**data)
 
 
@@ -183,6 +232,16 @@ class User:
     @classmethod
     def from_dict(cls, data: Dict) -> 'User':
         """Create from Firestore dictionary"""
-        data['created_at'] = datetime.fromisoformat(data['created_at'])
-        data['last_login'] = datetime.fromisoformat(data['last_login'])
+        # Handle created_at - might already be a datetime object from Cosmos DB
+        if isinstance(data['created_at'], str):
+            data['created_at'] = datetime.fromisoformat(data['created_at'])
+        elif not isinstance(data['created_at'], datetime):
+            data['created_at'] = datetime.now()
+
+        # Handle last_login - might already be a datetime object from Cosmos DB
+        if isinstance(data['last_login'], str):
+            data['last_login'] = datetime.fromisoformat(data['last_login'])
+        elif not isinstance(data['last_login'], datetime):
+            data['last_login'] = datetime.now()
+
         return cls(**data)

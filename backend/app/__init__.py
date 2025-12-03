@@ -107,6 +107,9 @@ def _register_blueprints(app):
     from app.routes.analytics import analytics_bp
     from app.routes.ai import ai_bp
     from app.routes.schedule import schedule_bp
+    from app.routes.imessage import imessage_bp
+    from app.routes.users import users_bp
+    from app.routes.study import study_bp
 
     # Register with /api prefix
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
@@ -117,6 +120,9 @@ def _register_blueprints(app):
     app.register_blueprint(analytics_bp, url_prefix='/api/analytics')
     app.register_blueprint(ai_bp, url_prefix='/api/ai')
     app.register_blueprint(schedule_bp, url_prefix='/api/schedule')
+    app.register_blueprint(imessage_bp, url_prefix='/api/imessage')
+    app.register_blueprint(users_bp, url_prefix='/api/users')
+    app.register_blueprint(study_bp, url_prefix='/api/study')
 
     print("Blueprints registered")
 
