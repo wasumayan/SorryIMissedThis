@@ -55,20 +55,26 @@ if ! command -v brew &> /dev/null; then
     print_success "Homebrew installed"
 else
     print_success "Homebrew found"
+    # Update Homebrew to support newer macOS versions
+    print_status "Updating Homebrew..."
+    brew update &> /dev/null || print_warning "Homebrew update skipped (may be on newer macOS beta)"
 fi
 
 # Check for Python 3.9+
 if ! command -v python3 &> /dev/null; then
     print_warning "Python 3 not found. Installing Python..."
-    brew install python@3.9
+    brew install python@3.11 || brew install python3
     print_success "Python installed"
 else
-    PYTHON_VERSION=$(python3 --version | cut -d' ' -f2 | cut -d'.' -f1,2)
-    REQUIRED_VERSION=3.9
-    if (( $(echo "$PYTHON_VERSION < $REQUIRED_VERSION" | bc -l) )); then
-        print_warning "Python version $PYTHON_VERSION is too old. Installing Python 3.9..."
-        brew install python@3.9
-        print_success "Python 3.9 installed"
+    PYTHON_VERSION=$(python3 --version | cut -d' ' -f2)
+    PYTHON_MAJOR=$(echo "$PYTHON_VERSION" | cut -d'.' -f1)
+    PYTHON_MINOR=$(echo "$PYTHON_VERSION" | cut -d'.' -f2)
+
+    # Check if Python is 3.9 or higher (works for 3.9, 3.10, 3.11, 3.12, 3.13, etc.)
+    if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 9 ]); then
+        print_warning "Python version $PYTHON_VERSION is too old (need 3.9+). Installing newer Python..."
+        brew install python@3.11 || brew install python3
+        print_success "Python upgraded"
     else
         print_success "Python $PYTHON_VERSION found"
     fi
